@@ -1,0 +1,285 @@
+// LaunchNest — Prisma schema
+// Status legend used in comments: IMPLEMENTED | MOCKED | FUTURE
+// Phase 1 wires up: User, Project, Deployment (basic), UsageRecord/plan limits.
+// All other models are defined now (so later phases don't need migrations
+// that break existing data) but are not yet used by application code.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum Visibility {
+  PUBLIC
+  PRIVATE
+  UNLISTED
+}
+
+enum Framework {
+  STATIC
+  VITE_REACT
+  NEXTJS
+  UNKNOWN
+}
+
+enum DeploymentStatus {
+  QUEUED
+  BUILDING
+  READY
+  FAILED
+  CANCELLED
+}
+
+enum DeploymentSource {
+  ZIP_UPLOAD
+  GITHUB_IMPORT
+  AI_GENERATED
+  TEMPLATE
+  EDITOR
+}
+
+enum PlanTier {
+  FREE
+  PRO
+  TEAM
+}
+
+enum TeamRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+// ---------- Core ----------
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String?
+  passwordHash  String? // null when the user only ever used an OAuth provider
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  planTier      PlanTier @default(FREE)
+
+  projects        Project[]
+  githubConnection GitHubConnection?
+  teamMemberships TeamMember[]
+  usageRecords    UsageRecord[]
+
+  @@index([email])
+}
+
+model Project {
+  id          String     @id @default(cuid())
+  name        String
+  slug        String     @unique // used for slug.platform.com — reserved-name checked at creation
+  description String?
+  visibility  Visibility @default(PRIVATE)
+  framework   Framework  @default(STATIC)
+  passwordHash String?   // FUTURE: password-protected projects (section 9)
+
+  ownerId     String
+  owner       User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  teamId      String?
+  team        Team?      @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?  // soft delete, so slugs/subdomains can be reliably retired
+
+  deployments   Deployment[]
+  files         ProjectFile[]
+  domains       Domain[]
+  envVars       EnvironmentVariable[]
+  githubImport  GitHubImport?
+  analyticsEvents AnalyticsEvent[]
+
+  @@index([ownerId])
+  @@index([slug])
+}
+
+model Deployment {
+  id            String           @id @default(cuid())
+  projectId     String
+  project       Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  version       Int              // incrementing per-project (v1, v2, v3...)
+  status        DeploymentStatus @default(QUEUED)
+  source        DeploymentSource
+  commitSha     String?          // set for GITHUB_IMPORT
+  commitMessage String?
+
+  isProduction  Boolean          @default(false)
+  isTemporary   Boolean          @default(false)
+  expiresAt     DateTime?        // set when isTemporary — cleanup job reads this
+
+  buildStartedAt   DateTime?
+  buildFinishedAt  DateTime?
+  buildDurationMs  Int?
+
+  storageKey    String?          // MOCKED in dev: local disk path. FUTURE: S3 object key.
+  errorMessage  String?
+
+  createdAt     DateTime         @default(now())
+
+  logs          DeploymentLog[]
+
+  @@unique([projectId, version])
+  @@index([projectId, status])
+}
+
+model DeploymentLog {
+  id           String     @id @default(cuid())
+  deploymentId String
+  deployment   Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+  message      String
+  level        String     @default("info") // info | warn | error
+  createdAt    DateTime   @default(now())
+
+  @@index([deploymentId])
+}
+
+model ProjectFile {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  path      String   // e.g. "index.html" — validated against path traversal
+  content   String?  @db.Text // MOCKED: inline storage for small text files in MVP
+  storageKey String? // FUTURE: S3 key for binary/large assets
+  size      Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, path])
+}
+
+model Domain {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  hostname     String   @unique // "myproject.launchnest.app" or a future custom domain
+  isCustom     Boolean  @default(false)
+  isPrimary    Boolean  @default(false)
+  verified     Boolean  @default(false) // FUTURE: DNS verification for custom domains
+  sslStatus    String   @default("none") // none | pending | active — FUTURE for custom domains
+  createdAt    DateTime @default(now())
+
+  @@index([projectId])
+}
+
+model EnvironmentVariable {
+  id             String   @id @default(cuid())
+  projectId      String
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  key            String
+  encryptedValue String   // AES-encrypted at rest; never returned to client after creation
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([projectId, key])
+}
+
+model GitHubConnection {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  githubUserId       String
+  githubUsername     String
+  encryptedAccessToken String // never exposed to client
+  createdAt          DateTime @default(now())
+
+  imports GitHubImport[]
+}
+
+model GitHubImport {
+  id             String            @id @default(cuid())
+  projectId      String            @unique
+  project        Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  connectionId   String
+  connection     GitHubConnection  @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  repoFullName   String            // "owner/repo"
+  branch         String            @default("main")
+  autoDeployOnPush Boolean         @default(false) // FUTURE: needs webhook infra
+  createdAt      DateTime          @default(now())
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  path      String
+  referrer  String?
+  country   String?
+  device    String?
+  browser   String?
+  // No IP address or persistent visitor ID is stored — privacy-conscious aggregate analytics only.
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  category    String
+  framework   Framework @default(STATIC)
+  authorName  String
+  tags        String[]
+  previewUrl  String?
+  filesJson   Json     // { "index.html": "...", "style.css": "..." }
+  createdAt   DateTime @default(now())
+}
+
+model Team {
+  id        String       @id @default(cuid())
+  name      String
+  createdAt DateTime     @default(now())
+
+  members   TeamMember[]
+  projects  Project[]
+}
+
+model TeamMember {
+  id       String   @id @default(cuid())
+  teamId   String
+  team     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     TeamRole @default(MEMBER)
+  joinedAt DateTime @default(now())
+
+  @@unique([teamId, userId])
+}
+
+model SubscriptionPlan {
+  id             String   @id @default(cuid())
+  tier           PlanTier @unique
+  maxProjects    Int
+  maxStorageMb   Int
+  maxBandwidthMb Int
+  maxDeployments Int // per project, retained in history
+  priceUsdCents  Int      @default(0) // FUTURE: billing not implemented yet
+}
+
+model UsageRecord {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectCount  Int      @default(0)
+  storageMb     Int      @default(0)
+  bandwidthMb   Int      @default(0)
+  deploymentCount Int    @default(0)
+  periodStart   DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId])
+}
