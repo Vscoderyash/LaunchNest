@@ -20,7 +20,7 @@ what's implemented, mocked, or still future work.
 
 ```bash
 npm install
-cp .env.example .env   # fill in DATABASE_URL, AUTH_SECRET, GitHub OAuth keys
+cp .env.example .env   # fill in DATABASE_URL, AUTH_SECRET, ENCRYPTION_KEY, GitHub OAuth keys
 npx prisma migrate dev --name init
 npx prisma db seed     # creates demo@launchnest.app / password123
 npm run dev
@@ -58,9 +58,18 @@ Run tests: `npm test`. Lint: `npm run lint`.
 - **Visibility enforcement**: PRIVATE projects 403 anyone but the owner;
   PUBLIC/UNLISTED are viewable by anyone with the link — enforced at the
   serving layer, not just hidden in the UI
+- **Deployment rollback**: promote any previous READY deployment back to
+  production; the swap is transactional (old production deployment is
+  demoted in the same transaction)
+- **Environment variables**: AES-256-GCM encrypted at rest
+  (`src/lib/encryption.ts`); the API only ever returns keys, never values,
+  once created — matching the spec's "never display secret values after
+  initial creation" requirement
+- Real project Settings tab (rename, change visibility, delete) — previously
+  a phase-gated placeholder with no actual content behind it
 - Dashboard: overview stats, website list, empty states, create-website flow
 - Path-traversal protection for project file paths
-- 21 unit tests (slug validation, path safety, plan limits, ZIP extraction)
+- 24 unit tests (slug validation, path safety, plan limits, ZIP extraction, encryption)
 
 **MOCKED** (a real code path exists, but it fakes the hard infrastructure part):
 - The "build" step in deployment creation. For a STATIC project it just
@@ -85,6 +94,9 @@ Run tests: `npm test`. Lint: `npm run lint`.
   visibility is enforced at access time; there's just no directory to omit
   UNLISTED projects *from* yet). Each has a disabled UI entry point tagged
   with the phase it belongs to (see the Build Order below).
+- Cancelling an in-flight (QUEUED/BUILDING) deployment — moot for now since
+  the mocked build completes synchronously and instantly, but the
+  CANCELLED state exists in the schema for when real async builds land.
 
 ## Subdomain routing
 
@@ -132,8 +144,8 @@ prisma/
 ## Build order (unchanged from the product spec)
 
 1. **Auth, database, dashboard, project creation** — done
-2. **ZIP upload, static deployment, subdomains, public/private** — done (this update)
-3. Deployment history, logs, rollback, usage limits (history/logs done; rollback pending)
+2. **ZIP upload, static deployment, subdomains, public/private** — done
+3. **Deployment history, logs, rollback, environment variables** — done (this update)
 4. GitHub integration, templates, editor
 5. AI website generation
 6. Analytics, custom domains, temporary deployments (temporary deployments partially done)
