@@ -43,27 +43,60 @@ Run tests: `npm test`. Lint: `npm run lint`.
 - Project CRUD with strict ownership checks (a user can never read/edit
   another user's project — enforced server-side on every route, not just hidden in the UI)
 - Slug generation, collision resolution, reserved-name blocking
-- Free-plan limits (3 projects) enforced at creation, centralized in `src/lib/limits.ts`
+- Free-plan limits (3 projects, storage cap) enforced at creation/upload,
+  centralized in `src/lib/limits.ts`
 - Deployment history + state machine (QUEUED → BUILDING → READY/FAILED),
   versioning, production/temporary deployment flags, auto subdomain assignment
+- **ZIP upload**: validates and extracts a ZIP (`src/lib/zip.ts`), detects
+  index.html/framework, blocks path traversal and zip bombs, enforces size
+  limits, replaces a project's files, wired into both "Create Website" and
+  an "Import Changes" button on the project page
+- **Subdomain routing architecture**: `middleware.ts` rewrites
+  `<slug>.<BASE_DOMAIN>` requests to `/_sites/<slug>/...`; the route handler
+  at `src/app/_sites/[slug]/[[...path]]/route.ts` serves the right file with
+  the right content-type
+- **Visibility enforcement**: PRIVATE projects 403 anyone but the owner;
+  PUBLIC/UNLISTED are viewable by anyone with the link — enforced at the
+  serving layer, not just hidden in the UI
 - Dashboard: overview stats, website list, empty states, create-website flow
 - Path-traversal protection for project file paths
-- Unit tests for slug validation, path safety, and plan limits
+- 21 unit tests (slug validation, path safety, plan limits, ZIP extraction)
 
 **MOCKED** (a real code path exists, but it fakes the hard infrastructure part):
 - The "build" step in deployment creation. For a STATIC project it just
   validates files exist and marks the deployment READY instantly — there is
   no real build container. See `src/app/api/projects/[id]/deployments/route.ts`
   for exactly what's mocked and why.
-- Subdomain **routing** — a `Domain` row is created per deployment, but
-  there's no edge routing layer that actually resolves
-  `project.launchnest.app` to files. That needs real infra (see below).
+- File storage: text files (html/css/js/json/svg/etc.) are stored as text in
+  Postgres (`ProjectFile.content`) rather than an object store. Binary
+  assets (images, fonts) from a ZIP are recorded as metadata only — their
+  bytes aren't persisted yet, and requesting one from `/_sites/...` returns
+  a 501 explaining why. Needs S3-compatible storage (Phase 2+ follow-up).
+- Real wildcard subdomains: the routing *architecture* is implemented and
+  testable (see "Subdomain routing" below), but `*.launchnest.app` on the
+  live Vercel deployment needs a custom domain with wildcard DNS added in
+  Vercel's dashboard — that's a DNS/infra step, not code, and hasn't been
+  done yet. Until then, every project is reachable at `/_sites/<slug>`.
 
 **FUTURE** (schema/UI placeholders exist; no logic behind them yet):
-- ZIP upload, GitHub import, AI website generation, template marketplace,
-  the code editor, analytics ingestion, custom domains + DNS/SSL, teams,
-  billing. Each has a disabled UI entry point tagged with the phase it
-  belongs to (see the Build Order below) so nothing pretends to work that doesn't.
+- GitHub import, AI website generation, template marketplace, the code
+  editor, analytics ingestion, custom domains + DNS/SSL, teams, billing,
+  a public "explore" page for PUBLIC projects (UNLISTED-vs-PUBLIC listing
+  visibility is enforced at access time; there's just no directory to omit
+  UNLISTED projects *from* yet). Each has a disabled UI entry point tagged
+  with the phase it belongs to (see the Build Order below).
+
+## Subdomain routing
+
+Locally: set `BASE_DOMAIN=localhost:3000` in `.env`, run `npm run dev`, and
+visit `http://<project-slug>.localhost:3000` — modern browsers resolve
+`*.localhost` automatically, no `/etc/hosts` edit needed. The middleware
+rewrites that request to `/_sites/<project-slug>/...` internally.
+
+In production, this needs a real domain with wildcard DNS
+(`*.yourdomain.com` → your Vercel project) added via Vercel's dashboard, then
+`BASE_DOMAIN=yourdomain.com` in your env vars. Until that's set up, every
+project is still reachable directly at `https://your-app.vercel.app/_sites/<slug>`.
 
 ## Why the "build" and "hosting" pieces are mocked, not real
 
@@ -98,8 +131,8 @@ prisma/
 
 ## Build order (unchanged from the product spec)
 
-1. **Auth, database, dashboard, project creation** — this repo
-2. ZIP upload, static deployment, subdomains, public/private
+1. **Auth, database, dashboard, project creation** — done
+2. **ZIP upload, static deployment, subdomains, public/private** — done (this update)
 3. Deployment history, logs, rollback, usage limits (history/logs done; rollback pending)
 4. GitHub integration, templates, editor
 5. AI website generation

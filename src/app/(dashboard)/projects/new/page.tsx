@@ -7,7 +7,7 @@ import { GitHubMark } from "@/components/icons/github-mark";
 
 const METHODS = [
   { id: "blank", label: "Start blank", icon: FileCode, implemented: true },
-  { id: "zip", label: "Upload ZIP", icon: Upload, implemented: false, phase: "Phase 2" },
+  { id: "zip", label: "Upload ZIP", icon: Upload, implemented: true },
   { id: "github", label: "Import GitHub", icon: GitHubMark, implemented: false, phase: "Phase 4" },
   { id: "template", label: "Start from template", icon: LayoutTemplate, implemented: false, phase: "Phase 4" },
   { id: "ai", label: "Generate with AI", icon: Sparkles, implemented: false, phase: "Phase 5" },
@@ -18,29 +18,60 @@ export default function NewProjectPage() {
   const [method, setMethod] = useState<(typeof METHODS)[number]["id"]>("blank");
   const [name, setName] = useState("");
   const [visibility, setVisibility] = useState<"PRIVATE" | "PUBLIC" | "UNLISTED">("PRIVATE");
+  const [zipFile, setZipFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setWarnings([]);
+
+    if (method === "zip" && !zipFile) {
+      setError("Choose a ZIP file first.");
+      return;
+    }
+
     setLoading(true);
 
-    const res = await fetch("/api/projects", {
+    const createRes = await fetch("/api/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, visibility }),
     });
+    const createData = await createRes.json();
 
-    const data = await res.json();
-    setLoading(false);
-
-    if (!res.ok) {
-      setError(data.error ?? "Something went wrong.");
+    if (!createRes.ok) {
+      setLoading(false);
+      setError(createData.error ?? "Something went wrong.");
       return;
     }
 
-    router.push(`/dashboard/projects/${data.project.slug}`);
+    if (method === "zip" && zipFile) {
+      const form = new FormData();
+      form.append("zip", zipFile);
+      const uploadRes = await fetch(`/api/projects/${createData.project.id}/upload`, {
+        method: "POST",
+        body: form,
+      });
+      const uploadData = await uploadRes.json();
+      setLoading(false);
+
+      if (!uploadRes.ok) {
+        // Project exists but with the default placeholder file — the user
+        // can retry the upload from the project page.
+        setError(`Project created, but the ZIP upload failed: ${uploadData.error}`);
+        return;
+      }
+      if (uploadData.warnings?.length) {
+        setWarnings(uploadData.warnings);
+      }
+    } else {
+      setLoading(false);
+    }
+
+    router.push(`/dashboard/projects/${createData.project.slug}`);
   }
 
   return (
@@ -72,7 +103,7 @@ export default function NewProjectPage() {
         ))}
       </div>
 
-      {method === "blank" ? (
+      {method === "blank" || method === "zip" ? (
         <form onSubmit={handleCreate} className="space-y-4 rounded-xl border border-neutral-800/80 p-5">
           <div>
             <label className="text-xs text-neutral-500 mb-1.5 block">Project name</label>
@@ -105,7 +136,25 @@ export default function NewProjectPage() {
             </div>
           </div>
 
+          {method === "zip" && (
+            <div>
+              <label className="text-xs text-neutral-500 mb-1.5 block">
+                ZIP file (must contain index.html at the root, max 20 MB)
+              </label>
+              <input
+                type="file"
+                accept=".zip"
+                required
+                onChange={(e) => setZipFile(e.target.files?.[0] ?? null)}
+                className="w-full text-sm text-neutral-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-neutral-800 file:text-neutral-200 file:text-sm"
+              />
+            </div>
+          )}
+
           {error && <p className="text-sm text-red-400">{error}</p>}
+          {warnings.map((w) => (
+            <p key={w} className="text-xs text-amber-400/90">{w}</p>
+          ))}
 
           <button
             disabled={loading}
@@ -116,7 +165,7 @@ export default function NewProjectPage() {
         </form>
       ) : (
         <p className="text-sm text-neutral-500">
-          This creation method isn&apos;t implemented yet — select &quot;Start blank&quot; to continue now.
+          This creation method isn&apos;t implemented yet — select &quot;Start blank&quot; or &quot;Upload ZIP&quot; to continue now.
         </p>
       )}
     </div>

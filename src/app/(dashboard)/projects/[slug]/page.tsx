@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { DeployButton } from "@/components/dashboard/deploy-button";
+import { ImportChangesButton } from "@/components/dashboard/import-changes-button";
 
 export default async function ProjectPage({
   params,
@@ -40,11 +41,26 @@ export default async function ProjectPage({
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-semibold">{project.name}</h1>
-          <p className="text-neutral-500 text-sm mt-1">
-            {primaryDomain ? `https://${primaryDomain.hostname}` : `${project.slug}.launchnest.app (not deployed yet)`}
-          </p>
+          <div className="flex items-center gap-3 text-sm mt-1">
+            <span className="text-neutral-500">
+              {primaryDomain ? `${primaryDomain.hostname} (needs wildcard DNS)` : `${project.slug}.launchnest.app (not deployed yet)`}
+            </span>
+            {latest?.status === "READY" && (
+              <a
+                href={`/_sites/${project.slug}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-neutral-300 hover:underline"
+              >
+                Preview →
+              </a>
+            )}
+          </div>
         </div>
-        <DeployButton projectId={project.id} />
+        <div className="flex items-center gap-2">
+          <ImportChangesButton projectId={project.id} />
+          <DeployButton projectId={project.id} />
+        </div>
       </div>
 
       <div className="flex gap-1 border-b border-neutral-800/80 overflow-x-auto">
