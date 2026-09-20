@@ -28,7 +28,9 @@ npm run dev
 
 Generate `AUTH_SECRET` with `openssl rand -base64 32`. Create a GitHub OAuth
 app at github.com/settings/developers with callback URL
-`http://localhost:3000/api/auth/callback/github`.
+`http://localhost:3000/api/auth/callback/github` (this is for *login* only).
+GitHub *import* uses a separate personal access token you paste in-app under
+"Create Website → Import GitHub" — no extra env var needed for that.
 
 Run tests: `npm test`. Lint: `npm run lint`.
 
@@ -65,6 +67,17 @@ Run tests: `npm test`. Lint: `npm run lint`.
   (`src/lib/encryption.ts`); the API only ever returns keys, never values,
   once created — matching the spec's "never display secret values after
   initial creation" requirement
+- **GitHub import**: connect via a personal access token (see note below on
+  why this replaces full OAuth-connect), list repos/branches, download a
+  repo@branch as a zipball and run it through the *same* ZIP validation
+  pipeline as manual upload — same index.html requirement, same path-safety
+  checks, same framework detection
+- **Templates**: a real marketplace listing (2 seeded templates with actual
+  multi-file content) with a working "use this template" flow that creates
+  a project and copies the template's files into it
+- **Editor**: file tree, textarea editor, and a genuinely live preview pane
+  that re-renders client-side as you type (no server round-trip needed to
+  preview) — see the "Editor" section below for exactly how and its limits
 - Real project Settings tab (rename, change visibility, delete) — previously
   a phase-gated placeholder with no actual content behind it
 - Dashboard: overview stats, website list, empty states, create-website flow
@@ -88,15 +101,49 @@ Run tests: `npm test`. Lint: `npm run lint`.
   done yet. Until then, every project is reachable at `/_sites/<slug>`.
 
 **FUTURE** (schema/UI placeholders exist; no logic behind them yet):
-- GitHub import, AI website generation, template marketplace, the code
-  editor, analytics ingestion, custom domains + DNS/SSL, teams, billing,
-  a public "explore" page for PUBLIC projects (UNLISTED-vs-PUBLIC listing
-  visibility is enforced at access time; there's just no directory to omit
-  UNLISTED projects *from* yet). Each has a disabled UI entry point tagged
-  with the phase it belongs to (see the Build Order below).
+- AI website generation, analytics ingestion, custom domains + DNS/SSL,
+  teams, billing, a public "explore" page for PUBLIC projects
+  (UNLISTED-vs-PUBLIC listing visibility is enforced at access time; there's
+  just no directory to omit UNLISTED projects *from* yet), Monaco-based
+  editing (current editor is a plain textarea by design — spec section 13
+  explicitly allows deferring this), multi-file live preview (see Editor note)
 - Cancelling an in-flight (QUEUED/BUILDING) deployment — moot for now since
   the mocked build completes synchronously and instantly, but the
   CANCELLED state exists in the schema for when real async builds land.
+- Real OAuth "Connect GitHub" flow and auto-deploy-on-push webhooks — see
+  the GitHub import note below for what shipped instead and why.
+
+## GitHub import: PAT instead of OAuth-connect
+
+The spec calls for a "Connect GitHub" OAuth flow. I implemented import via a
+**personal access token** instead, and want to be upfront about why rather
+than let it look like an oversight: Auth.js (NextAuth v5) already uses
+GitHub OAuth for *login*. Getting a *second*, `repo`-scoped GitHub token
+linked to an already-logged-in user runs into NextAuth's account-linking
+rules — by default it won't attach a second OAuth account to an existing
+user without either fighting the Prisma adapter's unique constraints or
+enabling `allowDangerousEmailAccountLinking` (which has real security
+implications for an auth system, not something to flip on quietly to make
+an unrelated feature simpler). A PAT-based connect has the same security
+properties the spec asks for — the token is encrypted at rest
+(`GitHubConnection.encryptedAccessToken`, same AES-256-GCM as env vars) and
+never sent back to the client — it's just a simpler flow than a real OAuth
+handshake. Swapping in true OAuth-connect later is a contained change: same
+`GitHubConnection` table, same `src/lib/github.ts` helpers, just a different
+route to populate `encryptedAccessToken`.
+
+## Editor: what "live preview" actually means here
+
+The editor's preview pane doesn't ask the server anything — it builds the
+preview entirely in the browser by inlining `style.css` into `<head>` and
+`script.js` before `</body>` of whatever `index.html` currently says (using
+the in-progress draft, not just the last save). That's genuinely live and
+fast, but it's a real limitation, not a corner cut silently: a file that
+references *other* files via `<link>` or `<script src="...">` (anything
+beyond the conventional three) won't resolve inside the sandboxed
+`srcDoc`, since there's no server backing that URL inside the iframe.
+Proper multi-file preview needs blob URLs or a service worker intercepting
+requests — noted as FUTURE rather than attempted half-way.
 
 ## Subdomain routing
 
@@ -145,8 +192,9 @@ prisma/
 
 1. **Auth, database, dashboard, project creation** — done
 2. **ZIP upload, static deployment, subdomains, public/private** — done
-3. **Deployment history, logs, rollback, environment variables** — done (this update)
-4. GitHub integration, templates, editor
+3. **Deployment history, logs, rollback, environment variables** — done
+4. **GitHub integration, templates, editor** — done (this update; GitHub via
+   PAT rather than OAuth-connect, editor is textarea-based, see notes above)
 5. AI website generation
 6. Analytics, custom domains, temporary deployments (temporary deployments partially done)
 7. Teams, billing, advanced infrastructure

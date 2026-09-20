@@ -7,11 +7,12 @@ import { ImportChangesButton } from "@/components/dashboard/import-changes-butto
 import { RollbackButton } from "@/components/dashboard/rollback-button";
 import { EnvVarsPanel } from "@/components/dashboard/env-vars-panel";
 import { ProjectSettingsForm } from "@/components/dashboard/project-settings-form";
+import { SimpleEditor } from "@/components/dashboard/simple-editor";
 
 const TABS = [
   { key: "overview", label: "Overview", implemented: true },
   { key: "deployments", label: "Deployments", implemented: true },
-  { key: "editor", label: "Editor", implemented: false, phase: "Phase 4" },
+  { key: "editor", label: "Editor", implemented: true },
   { key: "analytics", label: "Analytics", implemented: false, phase: "Phase 6" },
   { key: "domains", label: "Domains", implemented: false, phase: "Phase 6" },
   { key: "env", label: "Environment Variables", implemented: true },
@@ -151,6 +152,8 @@ export default async function ProjectPage({
           )}
         </div>
       )}
+
+      {activeTab === "editor" && <SimpleEditor projectId={project.id} />}
 
       {activeTab === "env" && <EnvVarsPanel projectId={project.id} />}
 

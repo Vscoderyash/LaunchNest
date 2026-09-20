@@ -4,12 +4,14 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sparkles, Upload, LayoutTemplate, FileCode } from "lucide-react";
 import { GitHubMark } from "@/components/icons/github-mark";
+import { GithubImportPanel } from "@/components/dashboard/github-import-panel";
+import { TemplatePickerPanel } from "@/components/dashboard/template-picker-panel";
 
 const METHODS = [
   { id: "blank", label: "Start blank", icon: FileCode, implemented: true },
   { id: "zip", label: "Upload ZIP", icon: Upload, implemented: true },
-  { id: "github", label: "Import GitHub", icon: GitHubMark, implemented: false, phase: "Phase 4" },
-  { id: "template", label: "Start from template", icon: LayoutTemplate, implemented: false, phase: "Phase 4" },
+  { id: "github", label: "Import GitHub", icon: GitHubMark, implemented: true },
+  { id: "template", label: "Start from template", icon: LayoutTemplate, implemented: true },
   { id: "ai", label: "Generate with AI", icon: Sparkles, implemented: false, phase: "Phase 5" },
 ] as const;
 
@@ -59,8 +61,6 @@ export default function NewProjectPage() {
       setLoading(false);
 
       if (!uploadRes.ok) {
-        // Project exists but with the default placeholder file — the user
-        // can retry the upload from the project page.
         setError(`Project created, but the ZIP upload failed: ${uploadData.error}`);
         return;
       }
@@ -103,7 +103,7 @@ export default function NewProjectPage() {
         ))}
       </div>
 
-      {method === "blank" || method === "zip" ? (
+      {(method === "blank" || method === "zip") && (
         <form onSubmit={handleCreate} className="space-y-4 rounded-xl border border-neutral-800/80 p-5">
           <div>
             <label className="text-xs text-neutral-500 mb-1.5 block">Project name</label>
@@ -163,11 +163,10 @@ export default function NewProjectPage() {
             {loading ? "Creating…" : "Create project"}
           </button>
         </form>
-      ) : (
-        <p className="text-sm text-neutral-500">
-          This creation method isn&apos;t implemented yet — select &quot;Start blank&quot; or &quot;Upload ZIP&quot; to continue now.
-        </p>
       )}
+
+      {method === "github" && <GithubImportPanel />}
+      {method === "template" && <TemplatePickerPanel />}
     </div>
   );
 }
