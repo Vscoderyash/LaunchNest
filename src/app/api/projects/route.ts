@@ -1,8 +1,14 @@
 // IMPLEMENTED
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/session";
+import {
+  getUser,
+  projectsCol,
+  projectFilesCol,
+  deploymentsCol,
+  createProjectWithUniqueSlug,
+} from "@/lib/firestore";
 import { isReservedSlug, isValidSlug, slugify } from "@/lib/slug";
 import { getLimitsForTier } from "@/lib/limits";
 
@@ -12,28 +18,31 @@ const CreateProjectSchema = z.object({
 });
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const session = await getSession();
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const projects = await prisma.project.findMany({
-    where: { ownerId: session.user.id, deletedAt: null },
-    orderBy: { updatedAt: "desc" },
-    include: {
-      deployments: {
-        orderBy: { version: "desc" },
-        take: 1,
-      },
-    },
-  });
+  const snap = await projectsCol()
+    .where("ownerId", "==", session.uid)
+    .where("deletedAt", "==", null)
+    .orderBy("updatedAt", "desc")
+    .get();
+
+  const projects = await Promise.all(
+    snap.docs.map(async (doc) => {
+      const latestSnap = await deploymentsCol(doc.id).orderBy("version", "desc").limit(1).get();
+      const deployments = latestSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      return { id: doc.id, ...doc.data(), deployments };
+    })
+  );
 
   return NextResponse.json({ projects });
 }
 
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const session = await getSession();
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -46,17 +55,19 @@ export async function POST(req: Request) {
     );
   }
 
-  const user = await prisma.user.findUnique({ where: { id: session.user.id } });
+  const user = await getUser(session.uid);
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   // Enforce free-plan project limit (spec section 20).
   const limits = getLimitsForTier(user.planTier);
-  const currentCount = await prisma.project.count({
-    where: { ownerId: user.id, deletedAt: null },
-  });
-  if (currentCount >= limits.maxProjects) {
+  const countSnap = await projectsCol()
+    .where("ownerId", "==", session.uid)
+    .where("deletedAt", "==", null)
+    .count()
+    .get();
+  if (countSnap.data().count >= limits.maxProjects) {
     return NextResponse.json(
       {
         error: `You've reached your ${user.planTier.toLowerCase()} plan website limit (${limits.maxProjects}). Upgrade to create more.`,
@@ -81,33 +92,26 @@ export async function POST(req: Request) {
     );
   }
 
-  // Resolve slug collisions deterministically: name, name-2, name-3, ...
-  let slug = baseSlug;
-  let suffix = 2;
-  while (await prisma.project.findUnique({ where: { slug } })) {
-    slug = `${baseSlug}-${suffix}`;
-    suffix += 1;
-  }
-
-  const project = await prisma.project.create({
-    data: {
-      name,
-      slug,
-      visibility,
-      ownerId: user.id,
-      files: {
-        // "Start blank" still needs a deployable artifact — a minimal
-        // placeholder page — so Deploy works immediately instead of failing.
-        create: [
-          {
-            path: "index.html",
-            content: `<!doctype html>\n<html><head><meta charset="utf-8"><title>${name}</title></head><body style="font-family:system-ui;background:#0a0a0a;color:#e5e5e5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>${name} is live on LaunchNest 🚀</p></body></html>\n`,
-            size: 0,
-          },
-        ],
-      },
-    },
+  const now = new Date().toISOString();
+  const { id, slug } = await createProjectWithUniqueSlug(baseSlug, {
+    name,
+    visibility,
+    framework: "STATIC",
+    ownerId: session.uid,
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null,
   });
 
-  return NextResponse.json({ project }, { status: 201 });
+  // "Start blank" still needs a deployable artifact — a minimal placeholder
+  // page — so Deploy works immediately instead of failing.
+  const placeholderHtml = `<!doctype html>\n<html><head><meta charset="utf-8"><title>${name}</title></head><body style="font-family:system-ui;background:#0a0a0a;color:#e5e5e5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>${name} is live on LaunchNest 🚀</p></body></html>\n`;
+  await projectFilesCol(id).add({
+    path: "index.html",
+    content: placeholderHtml,
+    size: Buffer.byteLength(placeholderHtml, "utf-8"),
+    updatedAt: now,
+  });
+
+  return NextResponse.json({ project: { id, slug, name, visibility } }, { status: 201 });
 }

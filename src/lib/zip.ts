@@ -9,6 +9,11 @@ export const MAX_ZIP_BYTES = 20 * 1024 * 1024; // 20 MB raw upload
 export const MAX_ENTRY_COUNT = 500;
 export const MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024; // zip-bomb guard
 
+// Firestore caps a document at 1 MiB (1,048,576 bytes) TOTAL, including field
+// overhead — not just this one field. Leave real headroom for the path/size/
+// updatedAt fields and per-field overhead rather than cutting it close.
+export const MAX_FIRESTORE_TEXT_BYTES = 900_000;
+
 const TEXT_EXTENSIONS = new Set([
   "html", "htm", "css", "js", "mjs", "json", "svg", "txt", "md", "webmanifest",
 ]);
@@ -85,13 +90,21 @@ export function extractZip(buffer: Buffer): ExtractResult {
     const ext = extOf(rawPath);
     const isText = TEXT_EXTENSIONS.has(ext);
 
-    if (isText) {
+    if (isText && entry.header.size <= MAX_FIRESTORE_TEXT_BYTES) {
       files.push({
         path: rawPath,
         content: entry.getData().toString("utf-8"),
         size: entry.header.size,
         isText: true,
       });
+    } else if (isText) {
+      // Too large for a single Firestore document — demote to metadata-only,
+      // same as a genuine binary file, rather than crash the whole upload
+      // when Firestore rejects an oversized write.
+      warnings.push(
+        `"${rawPath}" is too large to store (${(entry.header.size / 1024).toFixed(0)} KB, max ~${MAX_FIRESTORE_TEXT_BYTES / 1024} KB per file) and was not saved — split it up or use object storage (see README).`
+      );
+      files.push({ path: rawPath, content: null, size: entry.header.size, isText: false });
     } else {
       // Binary assets (images, fonts, etc.): MOCKED — metadata is recorded but
       // bytes aren't persisted until S3-backed storage exists (see README).

@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/session";
+import { projectsCol, deploymentsCol, withId, type ProjectDoc, type DeploymentDoc } from "@/lib/firestore";
 
 const STATUS_COLOR: Record<string, string> = {
   READY: "text-green-400",
@@ -11,13 +11,29 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export default async function DeploymentsPage() {
-  const session = await auth();
-  const deployments = await prisma.deployment.findMany({
-    where: { project: { ownerId: session!.user!.id as string } },
-    orderBy: { createdAt: "desc" },
-    take: 30,
-    include: { project: true },
-  });
+  const session = await getSession();
+
+  const projectsSnap = await projectsCol()
+    .where("ownerId", "==", session!.uid)
+    .where("deletedAt", "==", null)
+    .get();
+  const projects = projectsSnap.docs.map((d) => withId<ProjectDoc>(d));
+
+  // No ownerId denormalized onto every deployment doc, so this is a
+  // per-project fan-out + in-memory merge rather than a Firestore
+  // collectionGroup query — avoids needing a composite index to be created
+  // in the Firebase console before this page works (see README).
+  const perProject = await Promise.all(
+    projects.map(async (project) => {
+      const snap = await deploymentsCol(project.id).orderBy("createdAt", "desc").limit(10).get();
+      return snap.docs.map((d) => ({ ...withId<DeploymentDoc>(d), project }));
+    })
+  );
+
+  const deployments = perProject
+    .flat()
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 30);
 
   return (
     <div className="space-y-6">
@@ -39,7 +55,7 @@ export default async function DeploymentsPage() {
                 </p>
                 <p className="text-xs text-neutral-500">
                   {d.isProduction ? "Production" : d.isTemporary ? "Temporary" : "Preview"} ·{" "}
-                  {d.createdAt.toLocaleString()}
+                  {new Date(d.createdAt).toLocaleString()}
                 </p>
               </div>
               <span className={`text-xs font-medium ${STATUS_COLOR[d.status]}`}>{d.status}</span>

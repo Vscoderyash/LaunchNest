@@ -1,8 +1,8 @@
 // IMPLEMENTED
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/session";
+import { projectsCol, projectFilesCol, templatesCol } from "@/lib/firestore";
 
 const ApplySchema = z.object({ templateId: z.string().min(1) });
 
@@ -10,17 +10,15 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  const project = await prisma.project.findUnique({ where: { id } });
-  if (!project || project.deletedAt) {
+  const projectSnap = await projectsCol().doc(id).get();
+  if (!projectSnap.exists || projectSnap.data()!.deletedAt) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-  if (project.ownerId !== session.user.id) {
+  if (projectSnap.data()!.ownerId !== session.uid) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -30,24 +28,26 @@ export async function POST(
     return NextResponse.json({ error: "Invalid input" }, { status: 400 });
   }
 
-  const template = await prisma.template.findUnique({ where: { id: parsed.data.templateId } });
-  if (!template) {
+  const templateSnap = await templatesCol().doc(parsed.data.templateId).get();
+  if (!templateSnap.exists) {
     return NextResponse.json({ error: "Template not found" }, { status: 404 });
   }
-
+  const template = templateSnap.data()!;
   const filesJson = template.filesJson as Record<string, string>;
-  const files = Object.entries(filesJson).map(([path, content]) => ({
-    projectId: project.id,
-    path,
-    content,
-    size: Buffer.byteLength(content, "utf-8"),
-  }));
 
-  await prisma.$transaction([
-    prisma.projectFile.deleteMany({ where: { projectId: project.id } }),
-    prisma.projectFile.createMany({ data: files }),
-    prisma.project.update({ where: { id: project.id }, data: { framework: template.framework } }),
-  ]);
+  const filesRef = projectFilesCol(id);
+  const existing = await filesRef.get();
+  await Promise.all(existing.docs.map((d) => d.ref.delete()));
 
-  return NextResponse.json({ fileCount: files.length });
+  const now = new Date().toISOString();
+  const entries = Object.entries(filesJson);
+  await Promise.all(
+    entries.map(([path, content]) =>
+      filesRef.add({ path, content, size: Buffer.byteLength(content, "utf-8"), updatedAt: now })
+    )
+  );
+
+  await projectsCol().doc(id).update({ framework: template.framework, updatedAt: now });
+
+  return NextResponse.json({ fileCount: entries.length });
 }

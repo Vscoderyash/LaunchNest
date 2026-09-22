@@ -1,34 +1,27 @@
 // IMPLEMENTED (with a documented shortcut — see README "GitHub import").
-// Token is verified against GitHub, encrypted, and stored. It is never
-// returned to the client again (GET only reports whether a connection
-// exists + the linked username, never the token).
-
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/session";
+import { githubConnectionsCol } from "@/lib/firestore";
 import { encryptSecret } from "@/lib/encryption";
 import { verifyGitHubToken, GitHubApiError } from "@/lib/github";
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const connection = await prisma.gitHubConnection.findUnique({
-    where: { userId: session.user.id },
-    select: { githubUsername: true, createdAt: true },
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const snap = await githubConnectionsCol().doc(session.uid).get();
+  if (!snap.exists) return NextResponse.json({ connection: null });
+  return NextResponse.json({
+    connection: { githubUsername: snap.data()!.githubUsername, createdAt: snap.data()!.createdAt },
   });
-  return NextResponse.json({ connection });
 }
 
 const ConnectSchema = z.object({ token: z.string().min(10).max(255) });
 
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => null);
   const parsed = ConnectSchema.safeParse(body);
@@ -47,27 +40,19 @@ export async function POST(req: Request) {
   }
 
   const encryptedAccessToken = encryptSecret(parsed.data.token);
-
-  const connection = await prisma.gitHubConnection.upsert({
-    where: { userId: session.user.id },
-    update: { githubUserId: identity.id, githubUsername: identity.login, encryptedAccessToken },
-    create: {
-      userId: session.user.id,
-      githubUserId: identity.id,
-      githubUsername: identity.login,
-      encryptedAccessToken,
-    },
-    select: { githubUsername: true },
+  await githubConnectionsCol().doc(session.uid).set({
+    githubUserId: identity.id,
+    githubUsername: identity.login,
+    encryptedAccessToken,
+    createdAt: new Date().toISOString(),
   });
 
-  return NextResponse.json({ connection });
+  return NextResponse.json({ connection: { githubUsername: identity.login } });
 }
 
 export async function DELETE() {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  await prisma.gitHubConnection.deleteMany({ where: { userId: session.user.id } });
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  await githubConnectionsCol().doc(session.uid).delete();
   return NextResponse.json({ success: true });
 }

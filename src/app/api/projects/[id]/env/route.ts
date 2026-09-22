@@ -4,41 +4,41 @@
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/session";
+import { projectsCol, envVarsCol } from "@/lib/firestore";
 import { encryptSecret } from "@/lib/encryption";
 
 const KEY_RE = /^[A-Z][A-Z0-9_]*$/;
 
-async function requireOwnedProject(projectId: string, userId: string) {
-  const project = await prisma.project.findUnique({ where: { id: projectId } });
-  if (!project || project.deletedAt) return { project: null, status: 404 as const };
-  if (project.ownerId !== userId) return { project: null, status: 403 as const };
-  return { project, status: 200 as const };
+async function requireOwnedProject(projectId: string, uid: string) {
+  const snap = await projectsCol().doc(projectId).get();
+  if (!snap.exists || snap.data()!.deletedAt) return { ok: false, status: 404 as const };
+  if (snap.data()!.ownerId !== uid) return { ok: false, status: 403 as const };
+  return { ok: true, status: 200 as const };
 }
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  const { project, status } = await requireOwnedProject(id, session.user.id);
-  if (!project) {
-    return NextResponse.json({ error: status === 404 ? "Project not found" : "Forbidden" }, { status });
+  const check = await requireOwnedProject(id, session.uid);
+  if (!check.ok) {
+    return NextResponse.json({ error: check.status === 404 ? "Project not found" : "Forbidden" }, { status: check.status });
   }
 
-  const vars = await prisma.environmentVariable.findMany({
-    where: { projectId: project.id },
-    select: { id: true, key: true, createdAt: true, updatedAt: true }, // never encryptedValue
-    orderBy: { key: "asc" },
-  });
+  const snap = await envVarsCol(id).orderBy("key", "asc").get();
+  const variables = snap.docs.map((d) => ({
+    id: d.id,
+    key: d.data().key,
+    createdAt: d.data().createdAt,
+    updatedAt: d.data().updatedAt,
+  })); // never encryptedValue
 
-  return NextResponse.json({ variables: vars });
+  return NextResponse.json({ variables });
 }
 
 const CreateEnvSchema = z.object({
@@ -50,15 +50,13 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  const { project, status } = await requireOwnedProject(id, session.user.id);
-  if (!project) {
-    return NextResponse.json({ error: status === 404 ? "Project not found" : "Forbidden" }, { status });
+  const check = await requireOwnedProject(id, session.uid);
+  if (!check.ok) {
+    return NextResponse.json({ error: check.status === 404 ? "Project not found" : "Forbidden" }, { status: check.status });
   }
 
   const body = await req.json().catch(() => null);
@@ -85,12 +83,18 @@ export async function POST(
     );
   }
 
-  const variable = await prisma.environmentVariable.upsert({
-    where: { projectId_key: { projectId: project.id, key } },
-    update: { encryptedValue },
-    create: { projectId: project.id, key, encryptedValue },
-    select: { id: true, key: true, createdAt: true, updatedAt: true },
-  });
+  const col = envVarsCol(id);
+  const existing = await col.where("key", "==", key).limit(1).get();
+  const now = new Date().toISOString();
 
-  return NextResponse.json({ variable }, { status: 201 });
+  let variableId: string;
+  if (!existing.empty) {
+    variableId = existing.docs[0].id;
+    await existing.docs[0].ref.update({ encryptedValue, updatedAt: now });
+  } else {
+    const ref = await col.add({ key, encryptedValue, createdAt: now, updatedAt: now });
+    variableId = ref.id;
+  }
+
+  return NextResponse.json({ variable: { id: variableId, key, createdAt: now, updatedAt: now } }, { status: 201 });
 }

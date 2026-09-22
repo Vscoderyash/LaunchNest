@@ -1,31 +1,30 @@
 // IMPLEMENTED
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/session";
+import { projectsCol, envVarsCol } from "@/lib/firestore";
 
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string; envId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id, envId } = await params;
-  const project = await prisma.project.findUnique({ where: { id } });
-  if (!project || project.deletedAt) {
+  const projectSnap = await projectsCol().doc(id).get();
+  if (!projectSnap.exists || projectSnap.data()!.deletedAt) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-  if (project.ownerId !== session.user.id) {
+  if (projectSnap.data()!.ownerId !== session.uid) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const variable = await prisma.environmentVariable.findUnique({ where: { id: envId } });
-  if (!variable || variable.projectId !== project.id) {
+  const varRef = envVarsCol(id).doc(envId);
+  const varSnap = await varRef.get();
+  if (!varSnap.exists) {
     return NextResponse.json({ error: "Environment variable not found" }, { status: 404 });
   }
 
-  await prisma.environmentVariable.delete({ where: { id: envId } });
+  await varRef.delete();
   return NextResponse.json({ success: true });
 }

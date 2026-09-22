@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import AdmZip from "adm-zip";
-import { extractZip, ZipValidationError } from "@/lib/zip";
+import { extractZip, ZipValidationError, MAX_FIRESTORE_TEXT_BYTES } from "@/lib/zip";
 
 function buildZip(files: Record<string, string>): Buffer {
   const zip = new AdmZip();
@@ -71,5 +71,18 @@ describe("extractZip", () => {
     const result = extractZip(buf);
     expect(result.framework).toBe("VITE_REACT");
     expect(result.warnings.some((w) => w.includes("VITE_REACT"))).toBe(true);
+  });
+
+  it("demotes an oversized text file to metadata-only instead of crashing", () => {
+    const bigContent = "a".repeat(MAX_FIRESTORE_TEXT_BYTES + 1000);
+    const zip = new AdmZip();
+    zip.addFile("index.html", Buffer.from("<h1>hi</h1>"));
+    zip.addFile("bundle.js", Buffer.from(bigContent));
+    const result = extractZip(zip.toBuffer());
+    const bundle = result.files.find((f) => f.path === "bundle.js");
+    expect(bundle?.isText).toBe(false);
+    expect(bundle?.content).toBeNull();
+    expect(bundle?.size).toBeGreaterThan(MAX_FIRESTORE_TEXT_BYTES);
+    expect(result.warnings.some((w) => w.includes("bundle.js") && w.includes("too large"))).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/session";
+import { getProjectBySlug, deploymentsCol, domainsCol, withId, type DeploymentDoc, type DomainDoc } from "@/lib/firestore";
 import { DeployButton } from "@/components/dashboard/deploy-button";
 import { ImportChangesButton } from "@/components/dashboard/import-changes-button";
 import { RollbackButton } from "@/components/dashboard/rollback-button";
@@ -29,21 +29,21 @@ export default async function ProjectPage({
   const { slug } = await params;
   const { tab } = await searchParams;
   const activeTab = TABS.some((t) => t.key === tab && t.implemented) ? tab! : "overview";
-  const session = await auth();
+  const session = await getSession();
 
-  const project = await prisma.project.findUnique({
-    where: { slug },
-    include: {
-      deployments: { orderBy: { version: "desc" } },
-      domains: true,
-    },
-  });
-
+  const project = await getProjectBySlug(slug);
   if (!project || project.deletedAt) notFound();
-  if (project.ownerId !== session!.user!.id) notFound(); // no cross-user access (spec section 21)
+  if (project.ownerId !== session!.uid) notFound(); // no cross-user access (spec section 21)
 
-  const latest = project.deployments[0];
-  const primaryDomain = project.domains.find((d) => d.isPrimary);
+  const [deploymentsSnap, domainsSnap] = await Promise.all([
+    deploymentsCol(project.id).orderBy("version", "desc").get(),
+    domainsCol(project.id).get(),
+  ]);
+  const deployments = deploymentsSnap.docs.map((d) => withId<DeploymentDoc>(d));
+  const domains = domainsSnap.docs.map((d) => withId<DomainDoc>(d));
+
+  const latest = deployments[0];
+  const primaryDomain = domains.find((d) => d.isPrimary);
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -101,7 +101,7 @@ export default async function ProjectPage({
               { label: "Status", value: latest?.status ?? "No deployments" },
               { label: "Framework", value: project.framework },
               { label: "Visibility", value: project.visibility },
-              { label: "Created", value: project.createdAt.toLocaleDateString() },
+              { label: "Created", value: new Date(project.createdAt).toLocaleDateString() },
             ].map((s) => (
               <div key={s.label} className="rounded-xl border border-neutral-800/80 p-3.5">
                 <p className="text-xs text-neutral-500">{s.label}</p>
@@ -110,7 +110,7 @@ export default async function ProjectPage({
             ))}
           </div>
 
-          {project.deployments.length === 0 && (
+          {deployments.length === 0 && (
             <p className="text-sm text-neutral-500">
               No deployments yet. Use &quot;Import Changes (ZIP)&quot; above to add files, then Deploy.
             </p>
@@ -120,11 +120,11 @@ export default async function ProjectPage({
 
       {activeTab === "deployments" && (
         <div>
-          {project.deployments.length === 0 ? (
+          {deployments.length === 0 ? (
             <p className="text-sm text-neutral-500">No deployments yet.</p>
           ) : (
             <div className="rounded-xl border border-neutral-800/80 divide-y divide-neutral-800/80">
-              {project.deployments.map((d) => (
+              {deployments.map((d) => (
                 <div key={d.id} className="flex items-center justify-between px-4 py-3 text-sm">
                   <span>
                     v{d.version} {d.isProduction && <span className="text-neutral-600">· production</span>}

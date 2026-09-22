@@ -1,9 +1,26 @@
 "use client";
 
 import { useState } from "react";
-import { signIn } from "next-auth/react";
+import { createUserWithEmailAndPassword, signInWithPopup, updateProfile } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { firebaseAuth, googleProvider } from "@/lib/firebase-client";
+
+async function establishSession(idToken: string) {
+  const res = await fetch("/api/auth/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken }),
+  });
+  if (!res.ok) throw new Error("Failed to establish session.");
+}
+
+function friendlyError(code: string): string {
+  if (code.includes("email-already-in-use")) return "An account with this email already exists.";
+  if (code.includes("weak-password")) return "Password must be at least 6 characters.";
+  if (code.includes("invalid-email")) return "That email address looks invalid.";
+  return "Something went wrong. Please try again.";
+}
 
 export default function SignupPage() {
   const router = useRouter();
@@ -17,27 +34,31 @@ export default function SignupPage() {
     e.preventDefault();
     setError(null);
     setLoading(true);
-
-    const res = await fetch("/api/auth/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password }),
-    });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setError(data.error ?? "Something went wrong.");
+    try {
+      const cred = await createUserWithEmailAndPassword(firebaseAuth, email, password);
+      if (name) await updateProfile(cred.user, { displayName: name });
+      // Force a fresh token: the cached one won't reflect the displayName
+      // we just set unless we explicitly ask for a refresh.
+      const idToken = await cred.user.getIdToken(true);
+      await establishSession(idToken);
+      router.push("/dashboard");
+    } catch (err) {
+      setError(friendlyError(err instanceof Error ? err.message : ""));
+    } finally {
       setLoading(false);
-      return;
     }
+  }
 
-    const signInRes = await signIn("credentials", { email, password, redirect: false });
-    setLoading(false);
-    if (signInRes?.error) {
-      router.push("/login");
-      return;
+  async function handleGoogle() {
+    setError(null);
+    try {
+      const cred = await signInWithPopup(firebaseAuth, googleProvider);
+      const idToken = await cred.user.getIdToken();
+      await establishSession(idToken);
+      router.push("/dashboard");
+    } catch {
+      setError("Google sign-in failed or was cancelled.");
     }
-    router.push("/dashboard");
   }
 
   return (
@@ -45,6 +66,25 @@ export default function SignupPage() {
       <div className="w-full max-w-sm">
         <h1 className="text-2xl font-semibold mb-1">Create your account</h1>
         <p className="text-sm text-neutral-500 mb-8">Free plan: 3 websites to start.</p>
+
+        <button
+          onClick={handleGoogle}
+          className="w-full flex items-center justify-center gap-2 border border-neutral-800 rounded-lg py-2.5 mb-3 hover:border-neutral-600 text-sm"
+        >
+          <svg width="16" height="16" viewBox="0 0 48 48">
+            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.9-2.26 5.36-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+            <path fill="#FBBC05" d="M10.53 28.59A14.5 14.5 0 0 1 9.5 24c0-1.59.27-3.13.75-4.59l-7.98-6.19A23.94 23.94 0 0 0 0 24c0 3.86.92 7.51 2.56 10.78l7.97-6.19z"/>
+            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+          </svg>
+          Continue with Google
+        </button>
+
+        <div className="flex items-center gap-3 mb-6">
+          <div className="h-px bg-neutral-800 flex-1" />
+          <span className="text-xs text-neutral-600">or</span>
+          <div className="h-px bg-neutral-800 flex-1" />
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <input
@@ -65,8 +105,8 @@ export default function SignupPage() {
           <input
             type="password"
             required
-            minLength={8}
-            placeholder="Password (min 8 characters)"
+            minLength={6}
+            placeholder="Password (min 6 characters)"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-neutral-600"

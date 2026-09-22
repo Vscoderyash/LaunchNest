@@ -1,24 +1,24 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/session";
+import { templatesCol } from "@/lib/firestore";
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const templates = await prisma.template.findMany({
-    orderBy: { name: "asc" },
-    select: {
-      id: true,
-      name: true,
-      description: true,
-      category: true,
-      framework: true,
-      authorName: true,
-      tags: true,
-      previewUrl: true,
-    },
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const snap = await templatesCol().orderBy("name", "asc").get();
+  const templates = snap.docs.map((d) => {
+    const data = d.data();
+    return {
+      id: d.id,
+      name: data.name,
+      description: data.description,
+      category: data.category,
+      framework: data.framework,
+      authorName: data.authorName,
+      tags: data.tags,
+      previewUrl: data.previewUrl ?? null,
+    };
   });
   return NextResponse.json({ templates });
 }

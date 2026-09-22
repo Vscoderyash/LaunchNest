@@ -1,23 +1,34 @@
 import Link from "next/link";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/session";
+import { getUser, projectsCol, deploymentsCol, withId, type ProjectDoc, type DeploymentDoc } from "@/lib/firestore";
 import { getLimitsForTier } from "@/lib/limits";
 import { EmptyWebsitesState } from "@/components/dashboard/empty-state";
 import { WebsiteCard } from "@/components/dashboard/website-card";
 
 export default async function OverviewPage() {
-  const session = await auth();
-  const userId = session!.user!.id as string;
+  const session = await getSession();
+  const uid = session!.uid;
 
-  const [user, projects, deploymentCount] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId } }),
-    prisma.project.findMany({
-      where: { ownerId: userId, deletedAt: null },
-      orderBy: { updatedAt: "desc" },
-      include: { deployments: { orderBy: { version: "desc" }, take: 1 } },
-    }),
-    prisma.deployment.count({ where: { project: { ownerId: userId } } }),
+  const [user, projectsSnap] = await Promise.all([
+    getUser(uid),
+    projectsCol().where("ownerId", "==", uid).where("deletedAt", "==", null).orderBy("updatedAt", "desc").get(),
   ]);
+
+  const projects = await Promise.all(
+    projectsSnap.docs.map(async (doc) => {
+      const latestSnap = await deploymentsCol(doc.id).orderBy("version", "desc").limit(1).get();
+      const deployments = latestSnap.docs.map((d) => withId<DeploymentDoc>(d));
+      return { ...withId<ProjectDoc>(doc), deployments };
+    })
+  );
+
+  // Small-scale MVP approach: sum per-project counts rather than a
+  // collection-group aggregate (would need a denormalized ownerId field on
+  // every deployment doc plus a composite index — not worth it yet).
+  const deploymentCounts = await Promise.all(
+    projects.map((p) => deploymentsCol(p.id).count().get().then((s) => s.data().count))
+  );
+  const deploymentCount = deploymentCounts.reduce((a, b) => a + b, 0);
 
   const limits = getLimitsForTier(user!.planTier);
   const liveCount = projects.filter((p) => p.deployments[0]?.status === "READY").length;

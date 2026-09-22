@@ -1,22 +1,24 @@
-// IMPLEMENTED: subdomain -> project routing architecture (spec section 8),
-// plus the existing dashboard auth guard.
+// IMPLEMENTED: subdomain -> project routing (spec section 8), plus a
+// lightweight dashboard auth guard.
 //
-// Real wildcard subdomains (*.launchnest.app) require a custom domain with
-// wildcard DNS configured on the host (e.g. Vercel "Add Domain" -> *.yourdomain).
-// That's a deployment/DNS step outside this repo, not more code. Until then:
-//   - Locally: set BASE_DOMAIN=localhost:3000 in .env and visit
-//     http://<project-slug>.localhost:3000 — modern browsers resolve
-//     *.localhost without any /etc/hosts changes.
-//   - Anywhere: visit /_sites/<project-slug> directly, which is what this
-//     middleware rewrites subdomain requests to internally.
+// IMPORTANT: this middleware runs on the Edge runtime, which cannot run
+// Firebase Admin SDK (it needs Node.js APIs). So this only checks whether
+// the session cookie *exists* — it does NOT verify it. Real verification
+// happens in every Server Component/Route Handler via getSession()
+// (src/lib/session.ts), which does run in the Node.js runtime. That's the
+// actual security boundary; this middleware redirect is a UX nicety (skip
+// rendering the dashboard shell just to redirect) than the enforcement.
+//
+// Real wildcard subdomains (*.launchnest.app) need a custom domain with
+// wildcard DNS configured on the host — see README "Subdomain routing".
 
-import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { NextResponse, type NextRequest } from "next/server";
+import { SESSION_COOKIE_NAME } from "@/lib/constants";
 
 const BASE_DOMAIN = process.env.BASE_DOMAIN || "localhost:3000";
 const RESERVED_HOSTS = new Set(["www", "app", "dashboard", "api"]);
 
-export default auth((req) => {
+export default function middleware(req: NextRequest) {
   const host = req.headers.get("host") || "";
   const { pathname } = req.nextUrl;
 
@@ -29,10 +31,12 @@ export default auth((req) => {
     }
   }
 
-  if (pathname.startsWith("/dashboard") && !req.auth) {
+  if (pathname.startsWith("/dashboard") && !req.cookies.get(SESSION_COOKIE_NAME)) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
-});
+
+  return NextResponse.next();
+}
 
 export const config = {
   matcher: ["/((?!_next|_sites|favicon.ico).*)"],

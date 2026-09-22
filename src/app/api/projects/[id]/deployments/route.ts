@@ -2,37 +2,48 @@
 // IMPLEMENTED: state machine, history, ownership checks, plan limits.
 // MOCKED: the actual "build" — for a STATIC project this just validates and
 //   marks files ready instantly. There is no isolated build container here.
-// FUTURE: real build workers (Docker), S3 artifact storage, subdomain routing
-//   at the edge — see /docs/architecture.md for the intended production design.
+// FUTURE: real build workers (Docker), S3 artifact storage, edge subdomain
+//   routing — see README for the intended production design.
 
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/session";
+import {
+  getUser,
+  projectsCol,
+  projectFilesCol,
+  deploymentsCol,
+  deploymentLogsCol,
+  domainsCol,
+} from "@/lib/firestore";
 import { getLimitsForTier } from "@/lib/limits";
 
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  const project = await prisma.project.findUnique({ where: { id } });
-  if (!project || project.deletedAt) {
+  const projectSnap = await projectsCol().doc(id).get();
+  if (!projectSnap.exists || projectSnap.data()!.deletedAt) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-  if (project.ownerId !== session.user.id) {
+  const project = { id: projectSnap.id, ...projectSnap.data() } as {
+    id: string;
+    slug: string;
+    ownerId: string;
+    framework: string;
+  };
+  if (project.ownerId !== session.uid) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const user = await prisma.user.findUnique({ where: { id: session.user.id } });
+  const user = await getUser(session.uid);
   const limits = getLimitsForTier(user!.planTier);
 
-  const deploymentCount = await prisma.deployment.count({ where: { projectId: project.id } });
-  if (deploymentCount >= limits.maxDeploymentsPerProject) {
+  const countSnap = await deploymentsCol(project.id).count().get();
+  if (countSnap.data().count >= limits.maxDeploymentsPerProject) {
     return NextResponse.json(
       { error: `Deployment history limit reached (${limits.maxDeploymentsPerProject}). Older deployments must be cleared first.` },
       { status: 403 }
@@ -43,73 +54,64 @@ export async function POST(
   const isTemporary: boolean = body?.isTemporary ?? false;
   const temporaryHours: number = body?.temporaryHours === 168 ? 168 : 24; // 7 days or 24h
 
-  const lastVersion = await prisma.deployment.findFirst({
-    where: { projectId: project.id },
-    orderBy: { version: "desc" },
-    select: { version: true },
-  });
-  const version = (lastVersion?.version ?? 0) + 1;
+  const lastVersionSnap = await deploymentsCol(project.id).orderBy("version", "desc").limit(1).get();
+  const version = (lastVersionSnap.docs[0]?.data().version ?? 0) + 1;
 
-  const filesCount = await prisma.projectFile.count({ where: { projectId: project.id } });
-  if (filesCount === 0) {
+  const filesCountSnap = await projectFilesCol(project.id).count().get();
+  if (filesCountSnap.data().count === 0) {
     return NextResponse.json(
       { error: "This project has no files yet. Upload a ZIP or use the editor before deploying." },
       { status: 400 }
     );
   }
 
-  const deployment = await prisma.deployment.create({
-    data: {
-      projectId: project.id,
-      version,
-      status: "QUEUED",
-      source: "EDITOR",
-      isProduction: !isTemporary,
-      isTemporary,
-      expiresAt: isTemporary
-        ? new Date(Date.now() + temporaryHours * 60 * 60 * 1000)
-        : null,
-    },
+  const now = new Date();
+  const deploymentRef = deploymentsCol(project.id).doc();
+  await deploymentRef.set({
+    version,
+    status: "READY", // MOCKED build completes synchronously — see file header
+    source: "EDITOR",
+    isProduction: !isTemporary,
+    isTemporary,
+    expiresAt: isTemporary ? new Date(now.getTime() + temporaryHours * 60 * 60 * 1000).toISOString() : null,
+    buildStartedAt: now.toISOString(),
+    buildFinishedAt: now.toISOString(),
+    buildDurationMs: 400 + Math.floor(Math.random() * 600),
+    createdAt: now.toISOString(),
   });
 
-  // MOCKED build: instant "build" for static files, with a synthetic log
-  // trail so the deployment detail page has something real to render.
-  await prisma.deploymentLog.createMany({
-    data: [
-      { deploymentId: deployment.id, message: "Deployment queued", level: "info" },
-      { deploymentId: deployment.id, message: "Starting build", level: "info" },
-      { deploymentId: deployment.id, message: `Detected framework: ${project.framework}`, level: "info" },
-      { deploymentId: deployment.id, message: "Validating files", level: "info" },
-      { deploymentId: deployment.id, message: "Publishing static assets", level: "info" },
-      { deploymentId: deployment.id, message: "Deployment ready", level: "info" },
-    ],
-  });
-
-  const finished = await prisma.deployment.update({
-    where: { id: deployment.id },
-    data: {
-      status: "READY",
-      buildStartedAt: new Date(),
-      buildFinishedAt: new Date(),
-      buildDurationMs: 400 + Math.floor(Math.random() * 600),
-      storageKey: `local://projects/${project.id}/deployments/${deployment.id}`,
-    },
-  });
+  const logs = [
+    "Deployment queued",
+    "Starting build",
+    `Detected framework: ${project.framework}`,
+    "Validating files",
+    "Publishing static assets",
+    "Deployment ready",
+  ];
+  const logsCol = deploymentLogsCol(project.id, deploymentRef.id);
+  await Promise.all(
+    logs.map((message) => logsCol.add({ message, level: "info", createdAt: new Date().toISOString() }))
+  );
 
   if (!isTemporary) {
     // New production deployment supersedes the previous one for hostname routing.
-    await prisma.deployment.updateMany({
-      where: { projectId: project.id, isProduction: true, NOT: { id: deployment.id } },
-      data: { isProduction: false },
-    });
+    const prevProdSnap = await deploymentsCol(project.id).where("isProduction", "==", true).get();
+    await Promise.all(
+      prevProdSnap.docs
+        .filter((d) => d.id !== deploymentRef.id)
+        .map((d) => d.ref.update({ isProduction: false }))
+    );
   }
 
   const hostname = `${project.slug}.launchnest.app`;
-  await prisma.domain.upsert({
-    where: { hostname },
-    update: {},
-    create: { projectId: project.id, hostname, isPrimary: true },
-  });
+  const existingDomain = await domainsCol(project.id).where("hostname", "==", hostname).limit(1).get();
+  if (existingDomain.empty) {
+    await domainsCol(project.id).add({ hostname, isPrimary: true, isCustom: false, createdAt: now.toISOString() });
+  }
 
-  return NextResponse.json({ deployment: finished, url: `https://${hostname}` }, { status: 201 });
+  const finalSnap = await deploymentRef.get();
+  return NextResponse.json(
+    { deployment: { id: finalSnap.id, ...finalSnap.data() }, url: `https://${hostname}` },
+    { status: 201 }
+  );
 }

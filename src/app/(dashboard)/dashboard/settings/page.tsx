@@ -1,10 +1,10 @@
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/session";
+import { getUser } from "@/lib/firestore";
 import { getLimitsForTier } from "@/lib/limits";
 
 export default async function SettingsPage() {
-  const session = await auth();
-  const user = await prisma.user.findUnique({ where: { id: session!.user!.id as string } });
+  const session = await getSession();
+  const user = await getUser(session!.uid);
   const limits = getLimitsForTier(user!.planTier);
 
   return (

@@ -1,31 +1,30 @@
 // IMPLEMENTED (spec section 7: "Allow rollback to a previous successful deployment")
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { projectsCol, deploymentsCol, deploymentLogsCol } from "@/lib/firestore";
+import { getSession } from "@/lib/session";
 
 export async function POST(
   _req: Request,
   { params }: { params: Promise<{ id: string; deploymentId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id, deploymentId } = await params;
-
-  const project = await prisma.project.findUnique({ where: { id } });
-  if (!project || project.deletedAt) {
+  const projectSnap = await projectsCol().doc(id).get();
+  if (!projectSnap.exists || projectSnap.data()!.deletedAt) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-  if (project.ownerId !== session.user.id) {
+  if (projectSnap.data()!.ownerId !== session.uid) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const target = await prisma.deployment.findUnique({ where: { id: deploymentId } });
-  if (!target || target.projectId !== project.id) {
+  const targetRef = deploymentsCol(id).doc(deploymentId);
+  const targetSnap = await targetRef.get();
+  if (!targetSnap.exists) {
     return NextResponse.json({ error: "Deployment not found" }, { status: 404 });
   }
+  const target = targetSnap.data()!;
   if (target.status !== "READY") {
     return NextResponse.json(
       { error: `Can only roll back to a READY deployment (this one is ${target.status}).` },
@@ -36,24 +35,16 @@ export async function POST(
     return NextResponse.json({ error: "This deployment is already in production." }, { status: 400 });
   }
 
-  const [, promoted] = await prisma.$transaction([
-    prisma.deployment.updateMany({
-      where: { projectId: project.id, isProduction: true },
-      data: { isProduction: false },
-    }),
-    prisma.deployment.update({
-      where: { id: target.id },
-      data: { isProduction: true, isTemporary: false, expiresAt: null },
-    }),
-  ]);
+  const prevProdSnap = await deploymentsCol(id).where("isProduction", "==", true).get();
+  await Promise.all(prevProdSnap.docs.map((d) => d.ref.update({ isProduction: false })));
+  await targetRef.update({ isProduction: true, isTemporary: false, expiresAt: null });
 
-  await prisma.deploymentLog.create({
-    data: {
-      deploymentId: target.id,
-      message: `Rolled back to v${target.version} from the dashboard`,
-      level: "info",
-    },
+  await deploymentLogsCol(id, deploymentId).add({
+    message: `Rolled back to v${target.version} from the dashboard`,
+    level: "info",
+    createdAt: new Date().toISOString(),
   });
 
-  return NextResponse.json({ deployment: promoted });
+  const updated = await targetRef.get();
+  return NextResponse.json({ deployment: { id: updated.id, ...updated.data() } });
 }

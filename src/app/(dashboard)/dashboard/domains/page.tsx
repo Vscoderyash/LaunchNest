@@ -1,14 +1,24 @@
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/session";
+import { projectsCol, domainsCol, withId, type DomainDoc } from "@/lib/firestore";
 import { Network } from "lucide-react";
 
 export default async function DomainsPage() {
-  const session = await auth();
-  const domains = await prisma.domain.findMany({
-    where: { project: { ownerId: session!.user!.id as string } },
-    include: { project: true },
-    orderBy: { createdAt: "desc" },
-  });
+  const session = await getSession();
+  const projectsSnap = await projectsCol()
+    .where("ownerId", "==", session!.uid)
+    .where("deletedAt", "==", null)
+    .get();
+
+  const domainsByProject = await Promise.all(
+    projectsSnap.docs.map(async (doc) => {
+      const domainsSnap = await domainsCol(doc.id).orderBy("createdAt", "desc").get();
+      return domainsSnap.docs.map((d) => ({
+        ...withId<DomainDoc>(d),
+        projectName: doc.data().name as string,
+      }));
+    })
+  );
+  const domains = domainsByProject.flat();
 
   return (
     <div className="space-y-6">
@@ -30,7 +40,7 @@ export default async function DomainsPage() {
             <div key={d.id} className="flex items-center justify-between px-4 py-3">
               <div>
                 <p className="text-sm font-medium">{d.hostname}</p>
-                <p className="text-xs text-neutral-500">{d.project.name}</p>
+                <p className="text-xs text-neutral-500">{d.projectName}</p>
               </div>
               <span className="text-xs text-neutral-500">
                 {d.isCustom ? "Custom" : "Platform"} · {d.isPrimary ? "Primary" : ""}

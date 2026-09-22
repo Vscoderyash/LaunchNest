@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { templatesCol, withId, type TemplateDoc } from "@/lib/firestore";
 
 export default async function TemplatesPage() {
-  const templates = await prisma.template.findMany({ orderBy: { name: "asc" } });
+  const snap = await templatesCol().orderBy("name", "asc").get();
+  const templates = snap.docs.map((d) => withId<TemplateDoc>(d));
 
   return (
     <div className="space-y-6">
@@ -18,7 +19,7 @@ export default async function TemplatesPage() {
 
       {templates.length === 0 ? (
         <p className="text-sm text-neutral-500">
-          No templates seeded yet — run <code>npx prisma db seed</code>.
+          No templates seeded yet — run <code>npm run seed</code>.
         </p>
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">

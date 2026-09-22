@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { Globe, Lock, EyeOff } from "lucide-react";
-import type { Deployment, Project } from "@prisma/client";
+import type { ProjectDoc, DeploymentDoc } from "@/lib/firestore";
 
 const VISIBILITY_ICON = { PUBLIC: Globe, PRIVATE: Lock, UNLISTED: EyeOff } as const;
 
 export function WebsiteCard({
   project,
 }: {
-  project: Project & { deployments: Deployment[] };
+  project: ({ id: string } & ProjectDoc) & { deployments: ({ id: string } & DeploymentDoc)[] };
 }) {
   const latest = project.deployments[0];
   const VisibilityIcon = VISIBILITY_ICON[project.visibility];
