@@ -11,6 +11,12 @@
 //
 // Real wildcard subdomains (*.launchnest.app) need a custom domain with
 // wildcard DNS configured on the host — see README "Subdomain routing".
+//
+// NOTE: the served-sites route lives at src/app/sites/ (no leading
+// underscore) deliberately — Next.js App Router treats any _-prefixed
+// folder as a private, non-routable folder. An earlier version of this
+// route was at _sites/ and silently never built as a route at all (it
+// simply didn't appear in `next build`'s route manifest, no error either).
 
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME } from "@/lib/constants";
@@ -22,11 +28,11 @@ export default function middleware(req: NextRequest) {
   const host = req.headers.get("host") || "";
   const { pathname } = req.nextUrl;
 
-  if (host.endsWith(`.${BASE_DOMAIN}`) && !pathname.startsWith("/_sites")) {
+  if (host.endsWith(`.${BASE_DOMAIN}`) && !pathname.startsWith("/sites")) {
     const subdomain = host.slice(0, -(`.${BASE_DOMAIN}`.length));
     if (subdomain && !RESERVED_HOSTS.has(subdomain)) {
       const url = req.nextUrl.clone();
-      url.pathname = `/_sites/${subdomain}${pathname === "/" ? "" : pathname}`;
+      url.pathname = `/sites/${subdomain}${pathname === "/" ? "" : pathname}`;
       return NextResponse.rewrite(url);
     }
   }
@@ -39,5 +45,5 @@ export default function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next|_sites|favicon.ico).*)"],
+  matcher: ["/((?!_next|sites|favicon.ico).*)"],
 };

@@ -5,10 +5,12 @@ import { WebsiteCard } from "@/components/dashboard/website-card";
 
 export default async function WebsitesPage() {
   const session = await getSession();
+  // No .orderBy() here: see the identical note in dashboard/page.tsx — two
+  // equality filters plus orderBy on a third field needs a composite index
+  // that doesn't exist on a fresh Firestore project. Sort in-memory instead.
   const snap = await projectsCol()
     .where("ownerId", "==", session!.uid)
     .where("deletedAt", "==", null)
-    .orderBy("updatedAt", "desc")
     .get();
 
   const projects = await Promise.all(
@@ -18,6 +20,7 @@ export default async function WebsitesPage() {
       return { ...withId<ProjectDoc>(doc), deployments };
     })
   );
+  projects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
   return (
     <div className="space-y-6">

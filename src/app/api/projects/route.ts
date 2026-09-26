@@ -8,6 +8,9 @@ import {
   projectFilesCol,
   deploymentsCol,
   createProjectWithUniqueSlug,
+  withId,
+  type ProjectDoc,
+  type DeploymentDoc,
 } from "@/lib/firestore";
 import { isReservedSlug, isValidSlug, slugify } from "@/lib/slug";
 import { getLimitsForTier } from "@/lib/limits";
@@ -23,19 +26,22 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // No .orderBy() here: see the identical note in dashboard pages — two
+  // equality filters plus orderBy on a third field needs a Firestore
+  // composite index that doesn't exist on a fresh project. Sort in-memory.
   const snap = await projectsCol()
     .where("ownerId", "==", session.uid)
     .where("deletedAt", "==", null)
-    .orderBy("updatedAt", "desc")
     .get();
 
   const projects = await Promise.all(
     snap.docs.map(async (doc) => {
       const latestSnap = await deploymentsCol(doc.id).orderBy("version", "desc").limit(1).get();
-      const deployments = latestSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      return { id: doc.id, ...doc.data(), deployments };
+      const deployments = latestSnap.docs.map((d) => withId<DeploymentDoc>(d));
+      return { ...withId<ProjectDoc>(doc), deployments };
     })
   );
+  projects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
   return NextResponse.json({ projects });
 }

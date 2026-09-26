@@ -56,7 +56,7 @@ export default async function ProjectPage({
             </span>
             {latest?.status === "READY" && (
               <a
-                href={`/_sites/${project.slug}`}
+                href={`/sites/${project.slug}`}
                 target="_blank"
                 rel="noreferrer"
                 className="text-neutral-300 hover:underline"

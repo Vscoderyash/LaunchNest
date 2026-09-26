@@ -65,7 +65,7 @@ Run tests: `npm test`. Lint: `npm run lint`. Build: `npm run build`.
   both running through the same validation pipeline (`src/lib/zip.ts`):
   index.html requirement, path-traversal protection, zip-bomb guard, and a
   **Firestore document size cap** (see "Firestore data model")
-- Subdomain routing architecture (`middleware.ts` + `/_sites/[slug]/...`),
+- Subdomain routing architecture (`middleware.ts` + `/sites/[slug]/...`),
   visibility enforcement (PRIVATE/PUBLIC/UNLISTED) at the serving layer
 - Environment variables encrypted at rest (AES-256-GCM), API only ever
   returns keys, never values, after creation
@@ -84,7 +84,7 @@ Run tests: `npm test`. Lint: `npm run lint`. Build: `npm run build`.
   persisted (see the Firestore size-cap note below). FUTURE: Firebase
   Storage is the natural fit given the rest of the stack.
 - Real wildcard subdomains — the routing architecture works
-  (`/_sites/<slug>` works right now), but `*.yourdomain` needs a custom
+  (`/sites/<slug>` works right now), but `*.yourdomain` needs a custom
   domain with wildcard DNS configured on the host, which is an infra step
   outside this repo
 
@@ -127,6 +127,23 @@ maintained counter field on the user doc at real scale. The deployments
 list page (`/dashboard/deployments`) does the same per-project fan-out
 rather than a `collectionGroup` query, specifically to avoid needing a
 composite index created in the Firebase console before the page works.
+
+**Composite indexes.** A Firestore query with two or more equality filters
+plus an `orderBy` on a *different* field needs a composite index — one that
+doesn't exist by default on a fresh project, and querying without it throws
+`FAILED_PRECONDITION` at request time, not at build time. Every project
+listing in this app (`/dashboard`, `/dashboard/websites`,
+`GET /api/projects`) originally did exactly that
+(`.where("ownerId", ...).where("deletedAt", ...).orderBy("updatedAt", ...)`)
+and would have thrown that error the moment anyone actually opened those
+pages against a real, freshly-created Firestore database — a failure mode
+none of `tsc`, `eslint`, or a successful `next build` catch, since it only
+happens once a real query actually runs. Fixed by dropping the `orderBy`
+from the query and sorting the (typically small, per-user) result set in
+memory instead, which needs no index at all. Every other `orderBy` in the
+app is on an unfiltered collection reference (a project's own deployments,
+files, env vars, etc.), which only needs the single-field index Firestore
+creates automatically — no composite index required there.
 
 **Firestore's 1 MiB document size limit.** This is the one real constraint
 switching off Postgres introduced. A Postgres `TEXT` column had effectively
@@ -200,7 +217,7 @@ Admin SDK. Worth revisiting when `firebase-admin` itself updates its
 ```
 src/
   app/            routes (App Router) — (dashboard)/dashboard/* holds every
-                  authenticated page; _sites/[slug]/... serves live sites
+                  authenticated page; sites/[slug]/... serves live sites
   components/     UI components (dashboard/, icons/, ui/)
   lib/            firebase-client.ts, firebase-admin.ts, session.ts,
                   firestore.ts, limits.ts, slug.ts, zip.ts, encryption.ts,
@@ -218,6 +235,16 @@ version of this codebase, where sibling pages sat directly under
 `(dashboard)/` and silently resolved to `/websites`, `/settings` and so on
 instead — a genuine bug that only surfaced once a full `next build` ran to
 completion and printed the real route manifest.)
+
+Also note `src/app/sites/` has **no leading underscore**. An earlier version
+of this route lived at `_sites/`, which seemed like a reasonable way to
+signal "this is an internal/special route." It isn't — Next.js App Router
+treats any folder prefixed with `_` as a **private folder excluded from
+routing entirely**. There's no error, no warning: the route simply never
+appears in `next build`'s route manifest and every request to it 404s. This
+meant the platform's actual core feature — serving a deployed site — never
+worked, not even in local dev, until this was caught by noticing the route
+missing from a full build's output.
 
 ## Build order (unchanged from the product spec)
 

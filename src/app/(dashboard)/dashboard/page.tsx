@@ -11,7 +11,11 @@ export default async function OverviewPage() {
 
   const [user, projectsSnap] = await Promise.all([
     getUser(uid),
-    projectsCol().where("ownerId", "==", uid).where("deletedAt", "==", null).orderBy("updatedAt", "desc").get(),
+    // No .orderBy() here deliberately: two equality filters plus an orderBy
+    // on a third field needs a Firestore composite index, which doesn't
+    // exist on a fresh project and isn't created automatically. Sorting
+    // in-memory after fetching avoids requiring manual index setup.
+    projectsCol().where("ownerId", "==", uid).where("deletedAt", "==", null).get(),
   ]);
 
   const projects = await Promise.all(
@@ -21,6 +25,7 @@ export default async function OverviewPage() {
       return { ...withId<ProjectDoc>(doc), deployments };
     })
   );
+  projects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
   // Small-scale MVP approach: sum per-project counts rather than a
   // collection-group aggregate (would need a denormalized ownerId field on
