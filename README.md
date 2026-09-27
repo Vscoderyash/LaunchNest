@@ -71,10 +71,17 @@ Run tests: `npm test`. Lint: `npm run lint`. Build: `npm run build`.
   returns keys, never values, after creation
 - Template marketplace with a real "use this template" flow
 - Editor: file tree, textarea, and a live client-side preview
+- **AI website generation**: describe a site, pick style/color/type/theme/
+  animation preferences, get a real generated static site
+  (`src/lib/ai.ts` + `/api/projects/[id]/generate-ai`) via the Anthropic
+  API. Same Firestore size-cap and storage-limit handling as ZIP
+  upload/GitHub import. Server-side only — `AI_PROVIDER_API_KEY` never
+  reaches the client.
 - Real Settings tab (rename, change visibility, delete)
-- 25 unit tests — all pure logic (slug validation, path safety, plan
+- 31 unit tests — all pure logic (slug validation, path safety, plan
   limits, ZIP extraction including the Firestore size cap, encryption
-  round-trip) and so unaffected by the Postgres→Firebase migration
+  round-trip, AI response parsing) and so unaffected by which database or
+  AI provider sits behind the app
 
 **MOCKED**:
 - The deployment "build" step — instant synthetic success for static files,
@@ -88,11 +95,14 @@ Run tests: `npm test`. Lint: `npm run lint`. Build: `npm run build`.
   domain with wildcard DNS configured on the host, which is an infra step
   outside this repo
 
-**FUTURE**: AI website generation, analytics ingestion, custom domains +
-DNS/SSL, teams, billing, a public "explore" page for PUBLIC projects, a real
-OAuth "Connect GitHub" flow (see note below), Monaco-based editing,
-multi-file live preview, cancelling in-flight deployments (moot until real
-async builds exist).
+**FUTURE**: analytics ingestion, custom domains + DNS/SSL, teams, billing,
+a public "explore" page for PUBLIC projects, a real OAuth "Connect GitHub"
+flow (see note below), Monaco-based editing, multi-file live preview,
+cancelling in-flight deployments (moot until real async builds exist),
+AI-driven "improve this website" / "fix this error" follow-up prompts
+(spec section 12 lists these alongside initial generation — only initial
+generation is implemented; iterating on an existing site conversationally
+is a natural extension of the same `src/lib/ai.ts` but wasn't built yet).
 
 ## Firestore data model
 
@@ -253,6 +263,8 @@ missing from a full build's output.
 3. **Deployment history, logs, rollback, environment variables** — done
 4. **GitHub integration, templates, editor** — done (GitHub via PAT rather
    than OAuth-connect, editor is textarea-based — see notes above)
-5. AI website generation
+5. **AI website generation** — done (initial generation only; "improve this
+   website" / "fix this error" iterative prompts are a natural extension of
+   the same code but not yet built)
 6. Analytics, custom domains, temporary deployments (temporary deployments partially done)
 7. Teams, billing, advanced infrastructure

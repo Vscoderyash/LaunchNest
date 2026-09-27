@@ -6,13 +6,14 @@ import { Sparkles, Upload, LayoutTemplate, FileCode } from "lucide-react";
 import { GitHubMark } from "@/components/icons/github-mark";
 import { GithubImportPanel } from "@/components/dashboard/github-import-panel";
 import { TemplatePickerPanel } from "@/components/dashboard/template-picker-panel";
+import { AiGeneratorPanel } from "@/components/dashboard/ai-generator-panel";
 
 const METHODS = [
   { id: "blank", label: "Start blank", icon: FileCode, implemented: true },
   { id: "zip", label: "Upload ZIP", icon: Upload, implemented: true },
   { id: "github", label: "Import GitHub", icon: GitHubMark, implemented: true },
   { id: "template", label: "Start from template", icon: LayoutTemplate, implemented: true },
-  { id: "ai", label: "Generate with AI", icon: Sparkles, implemented: false, phase: "Phase 5" },
+  { id: "ai", label: "Generate with AI", icon: Sparkles, implemented: true },
 ] as const;
 
 export default function NewProjectPage() {
@@ -94,11 +95,6 @@ export default function NewProjectPage() {
           >
             <m.icon size={18} className="text-neutral-400" />
             <span className="text-sm font-medium">{m.label}</span>
-            {!m.implemented && (
-              <span className="absolute top-2 right-2 text-[10px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-500">
-                {m.phase}
-              </span>
-            )}
           </button>
         ))}
       </div>
@@ -167,6 +163,7 @@ export default function NewProjectPage() {
 
       {method === "github" && <GithubImportPanel />}
       {method === "template" && <TemplatePickerPanel />}
+      {method === "ai" && <AiGeneratorPanel />}
     </div>
   );
 }
