@@ -12,7 +12,10 @@ async function establishSession(idToken: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ idToken }),
   });
-  if (!res.ok) throw new Error("Failed to establish session.");
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || `Failed to establish session (${res.status}).`);
+  }
 }
 
 function friendlyGoogleError(code: string): string {
@@ -40,7 +43,16 @@ export default function LoginPage() {
     try {
       const cred = await signInWithEmailAndPassword(firebaseAuth, email, password);
       const idToken = await cred.user.getIdToken();
-      await establishSession(idToken);
+      // Credentials were valid — a failure from here on is a server-side
+      // problem, not a wrong password, so don't mask it with the generic
+      // "Invalid email or password" below.
+      try {
+        await establishSession(idToken);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to establish session.");
+        setLoading(false);
+        return;
+      }
       router.push("/dashboard");
     } catch {
       setError("Invalid email or password.");

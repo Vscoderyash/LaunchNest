@@ -12,7 +12,10 @@ async function establishSession(idToken: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ idToken }),
   });
-  if (!res.ok) throw new Error("Failed to establish session.");
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || `Failed to establish session (${res.status}).`);
+  }
 }
 
 function friendlyError(code: string): string {

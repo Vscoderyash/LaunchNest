@@ -21,39 +21,65 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing ID token." }, { status: 400 });
   }
 
+  // getAdminAuth() throws synchronously if FIREBASE_SERVICE_ACCOUNT_KEY is
+  // missing/malformed — isolate that from token verification so a server
+  // configuration problem doesn't get misreported as "invalid token".
+  let adminAuth;
+  try {
+    adminAuth = getAdminAuth();
+  } catch (err) {
+    console.error("Firebase Admin init failed:", err);
+    return NextResponse.json(
+      { error: `Server auth configuration error: ${err instanceof Error ? err.message : "unknown"}` },
+      { status: 500 }
+    );
+  }
+
   let decoded;
   try {
-    decoded = await getAdminAuth().verifyIdToken(parsed.data.idToken);
-  } catch {
-    return NextResponse.json({ error: "Invalid or expired token." }, { status: 401 });
+    decoded = await adminAuth.verifyIdToken(parsed.data.idToken);
+  } catch (err) {
+    console.error("verifyIdToken failed:", err);
+    return NextResponse.json(
+      { error: `Invalid or expired token: ${err instanceof Error ? err.message : "unknown"}` },
+      { status: 401 }
+    );
   }
 
-  const sessionCookie = await getAdminAuth().createSessionCookie(parsed.data.idToken, {
-    expiresIn: SESSION_MAX_AGE_MS,
-  });
-
-  // Bootstrap the Firestore user doc on first sign-in (upsert, not overwrite,
-  // so we don't clobber planTier on every login).
-  const userRef = getDb().collection("users").doc(decoded.uid);
-  const existing = await userRef.get();
-  if (!existing.exists) {
-    await userRef.set({
-      email: decoded.email ?? null,
-      name: decoded.name ?? null,
-      planTier: "FREE",
-      createdAt: new Date().toISOString(),
+  try {
+    const sessionCookie = await adminAuth.createSessionCookie(parsed.data.idToken, {
+      expiresIn: SESSION_MAX_AGE_MS,
     });
-  }
 
-  const res = NextResponse.json({ success: true });
-  res.cookies.set(SESSION_COOKIE_NAME, sessionCookie, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: SESSION_MAX_AGE_MS / 1000,
-    path: "/",
-  });
-  return res;
+    // Bootstrap the Firestore user doc on first sign-in (upsert, not
+    // overwrite, so we don't clobber planTier on every login).
+    const userRef = getDb().collection("users").doc(decoded.uid);
+    const existing = await userRef.get();
+    if (!existing.exists) {
+      await userRef.set({
+        email: decoded.email ?? null,
+        name: decoded.name ?? null,
+        planTier: "FREE",
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    const res = NextResponse.json({ success: true });
+    res.cookies.set(SESSION_COOKIE_NAME, sessionCookie, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: SESSION_MAX_AGE_MS / 1000,
+      path: "/",
+    });
+    return res;
+  } catch (err) {
+    console.error("Session creation failed:", err);
+    return NextResponse.json(
+      { error: `Failed to create session: ${err instanceof Error ? err.message : "unknown"}` },
+      { status: 500 }
+    );
+  }
 }
 
 export async function DELETE() {
