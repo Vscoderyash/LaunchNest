@@ -19,7 +19,16 @@ function friendlyError(code: string): string {
   if (code.includes("email-already-in-use")) return "An account with this email already exists.";
   if (code.includes("weak-password")) return "Password must be at least 6 characters.";
   if (code.includes("invalid-email")) return "That email address looks invalid.";
-  return "Something went wrong. Please try again.";
+  if (code.includes("unauthorized-domain"))
+    return "This domain isn't authorized for sign-in yet — add it in Firebase Console → Authentication → Settings → Authorized domains.";
+  if (code.includes("popup-closed-by-user") || code.includes("cancelled-popup-request")) return "Sign-in was cancelled.";
+  if (code.includes("popup-blocked")) return "Your browser blocked the sign-in popup — allow popups for this site and try again.";
+  if (code.includes("operation-not-allowed"))
+    return "Google sign-in isn't enabled for this project — enable it in Firebase Console → Authentication → Sign-in method.";
+  if (code.includes("network-request-failed")) return "Network error — check your connection and try again.";
+  // Fallback keeps the raw code visible instead of hiding it, so an
+  // unanticipated error is still diagnosable instead of a dead end.
+  return code ? `Something went wrong (${code}).` : "Something went wrong. Please try again.";
 }
 
 export default function SignupPage() {
@@ -56,8 +65,9 @@ export default function SignupPage() {
       const idToken = await cred.user.getIdToken();
       await establishSession(idToken);
       router.push("/dashboard");
-    } catch {
-      setError("Google sign-in failed or was cancelled.");
+    } catch (err) {
+      const code = err instanceof Error ? err.message : "";
+      setError(friendlyError(code));
     }
   }
 

@@ -15,6 +15,17 @@ async function establishSession(idToken: string) {
   if (!res.ok) throw new Error("Failed to establish session.");
 }
 
+function friendlyGoogleError(code: string): string {
+  if (code.includes("unauthorized-domain"))
+    return "This domain isn't authorized for sign-in yet — add it in Firebase Console → Authentication → Settings → Authorized domains.";
+  if (code.includes("popup-closed-by-user") || code.includes("cancelled-popup-request")) return "Sign-in was cancelled.";
+  if (code.includes("popup-blocked")) return "Your browser blocked the sign-in popup — allow popups for this site and try again.";
+  if (code.includes("operation-not-allowed"))
+    return "Google sign-in isn't enabled for this project — enable it in Firebase Console → Authentication → Sign-in method.";
+  if (code.includes("network-request-failed")) return "Network error — check your connection and try again.";
+  return code ? `Google sign-in failed (${code}).` : "Google sign-in failed or was cancelled.";
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -45,8 +56,9 @@ export default function LoginPage() {
       const idToken = await cred.user.getIdToken();
       await establishSession(idToken);
       router.push("/dashboard");
-    } catch {
-      setError("Google sign-in failed or was cancelled.");
+    } catch (err) {
+      const code = err instanceof Error ? err.message : "";
+      setError(friendlyGoogleError(code));
     }
   }
 
