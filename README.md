@@ -212,15 +212,30 @@ The 25 unit tests didn't need to change at all — they test pure logic
 `src/lib/encryption.ts`) with no dependency on which database sits behind
 the app.
 
-## Known dependency vulnerability (not fixable from here)
+## Known dependency vulnerabilities (not fixed, with reasons)
 
-`npm audit` reports a moderate `uuid` vulnerability three levels deep in
-`firebase-admin`'s own dependency tree (via `gaxios`, a Google API client
-library `firebase-admin` depends on). It's not reachable through anything
-this app's code does with `uuid` — fixing it would mean forcing a version
-bump inside `firebase-admin`'s dependency tree, which risks breaking the
-Admin SDK. Worth revisiting when `firebase-admin` itself updates its
-`gaxios` dependency upstream.
+`npm audit` reports two that are deliberately left as-is:
+
+- A moderate `uuid` vulnerability three levels deep in `firebase-admin`'s
+  own dependency tree (via `gaxios`, a Google API client library
+  `firebase-admin` depends on). Not reachable through anything this app's
+  code does with `uuid` — fixing it would mean forcing a version bump
+  inside `firebase-admin`'s dependency tree, which risks breaking the
+  Admin SDK. Worth revisiting when `firebase-admin` updates `gaxios` upstream.
+- A critical vulnerability in `vitest`'s own UI/dev-server mode (arbitrary
+  file read when that server is listening). This project only ever runs
+  `vitest run` — the one-shot CI-style test runner — never `vitest --ui` or
+  the watch-mode dev server that exposes a network listener, so the actual
+  attack surface this enables is not present in how this repo uses it.
+  Upgrading would reintroduce a `vitest`/`@types/node` peer-dependency
+  conflict that previously broke the Vercel build (see the `.npmrc` /
+  pinned-versions history in this file's git log) — not worth the trade for
+  a vulnerability in a mode this project doesn't use.
+
+A real one *was* fixed: `next@16.3.5` had a critical RCE in `next/og`'s
+`ImageResponse` (this app doesn't use that API, but patching a critical RCE
+in a dependency costs nothing and shouldn't wait on that technicality) —
+bumped to `next@16.3.8`, a safe patch-level upgrade.
 
 ## Project structure
 
