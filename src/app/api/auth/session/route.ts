@@ -15,6 +15,19 @@ const SESSION_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 const SessionSchema = z.object({ idToken: z.string().min(10) });
 
 export async function POST(req: Request) {
+  try {
+    return await handlePost(req);
+  } catch (err) {
+    // Last-resort guard: never return a bare non-JSON 500 to the client.
+    console.error("Unhandled session error:", err);
+    return NextResponse.json(
+      { error: `Unexpected server error: ${err instanceof Error ? err.message : "unknown"}` },
+      { status: 500 }
+    );
+  }
+}
+
+async function handlePost(req: Request) {
   const body = await req.json().catch(() => null);
   const parsed = SessionSchema.safeParse(body);
   if (!parsed.success) {
