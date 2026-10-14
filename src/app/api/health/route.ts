@@ -1,14 +1,32 @@
-// Diagnostic endpoint: reports which server config is present and whether
-// the Firebase Admin SDK can actually initialise and reach Firestore.
-// Returns booleans and a coarse stage name only — never env var values,
-// and never raw error text (JSON.parse errors can echo fragments of the input).
+// Diagnostic endpoint. Reports which server env vars exist and, step by
+// step, whether Firebase Admin loads, Auth works, and Firestore is reachable.
+// Booleans / coarse codes only — never env values or raw error text
+// (JSON.parse errors can echo fragments of the input).
+//
+//   /api/health?skip=admin   -> env + runtime info only (never touches Firebase)
 
 import { NextResponse } from "next/server";
-import { getAdminAuth, getDb } from "@/lib/firebase-admin";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
-export async function GET() {
+function coarse(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.startsWith("FIREBASE_SERVICE_ACCOUNT_KEY")) return msg.split(" (")[0].slice(0, 200);
+  const grpc = msg.match(/^\d+ [A-Z_]+/)?.[0]; // e.g. "5 NOT_FOUND", "7 PERMISSION_DENIED"
+  if (grpc) return grpc;
+  const code = (err as { code?: string })?.code;
+  return typeof code === "string" ? code.slice(0, 80) : (err instanceof Error ? err.name : "error");
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label}-timeout`)), ms)),
+  ]);
+}
+
+export async function GET(req: Request) {
   const env = {
     FIREBASE_SERVICE_ACCOUNT_KEY: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_KEY),
     ENCRYPTION_KEY: Boolean(process.env.ENCRYPTION_KEY),
@@ -16,21 +34,44 @@ export async function GET() {
     NEXT_PUBLIC_FIREBASE_PROJECT_ID: Boolean(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID),
     AI_PROVIDER_API_KEY: Boolean(process.env.AI_PROVIDER_API_KEY),
   };
+  const runtime = { node: process.version, region: process.env.VERCEL_REGION ?? null };
 
-  let stage: "admin-init" | "firestore" | "ok" = "admin-init";
-  let detail: string | null = null;
-  try {
-    getAdminAuth();
-    stage = "firestore";
-    await getDb().collection("_health").limit(1).get();
-    stage = "ok";
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "unknown";
-    // Keep only our own config-error prefix or Firestore/gRPC error codes.
-    detail = msg.startsWith("FIREBASE_SERVICE_ACCOUNT_KEY")
-      ? msg.split(" (")[0].slice(0, 200)
-      : (msg.match(/^\d+ [A-Z_]+/)?.[0] ?? "error");
+  if (new URL(req.url).searchParams.get("skip") === "admin") {
+    return NextResponse.json({ ok: true, skipped: "admin", runtime, env });
   }
 
-  return NextResponse.json({ ok: stage === "ok", stage, detail, env }, { status: stage === "ok" ? 200 : 500 });
+  const steps: Record<string, string> = {};
+  let mod: typeof import("@/lib/firebase-admin") | null = null;
+  try {
+    mod = await import("@/lib/firebase-admin");
+    steps.import = "ok";
+  } catch (err) {
+    steps.import = `fail: ${coarse(err)}`;
+  }
+
+  if (mod) {
+    try {
+      mod.getAdminAuth();
+      steps.adminInit = "ok";
+    } catch (err) {
+      steps.adminInit = `fail: ${coarse(err)}`;
+    }
+    if (steps.adminInit === "ok") {
+      try {
+        await withTimeout(mod.getAdminAuth().listUsers(1), 8000, "auth");
+        steps.authApi = "ok";
+      } catch (err) {
+        steps.authApi = `fail: ${coarse(err)}`;
+      }
+      try {
+        await withTimeout(mod.getDb().collection("_health").limit(1).get(), 8000, "firestore");
+        steps.firestore = "ok";
+      } catch (err) {
+        steps.firestore = `fail: ${coarse(err)}`;
+      }
+    }
+  }
+
+  const ok = Object.values(steps).every((v) => v === "ok");
+  return NextResponse.json({ ok, steps, runtime, env }, { status: ok ? 200 : 500 });
 }
