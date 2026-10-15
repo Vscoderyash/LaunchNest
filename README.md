@@ -212,6 +212,18 @@ The 25 unit tests didn't need to change at all — they test pure logic
 `src/lib/encryption.ts`) with no dependency on which database sits behind
 the app.
 
+## Why the build uses webpack, not Turbopack
+
+`next build` / `next dev` run with `--webpack` on purpose. With Turbopack,
+`firebase-admin` is externalized under a hashed name
+(`firebase-admin-a14c8a5423a75469`) that is resolved through a symlink in
+`.next/node_modules/`. On Vercel that symlink doesn't survive function
+packaging, so importing `firebase-admin` threw a plain `Error` at module load
+and every server route that touches Firebase returned a bodyless HTTP 500
+(signup showed "Failed to establish session (500)"). Webpack externalizes it
+by its real name, which Vercel's file tracing handles. `/api/health` reports
+this kind of failure per step. Revisit once Turbopack's externals work on Vercel.
+
 ## Known dependency vulnerabilities (not fixed, with reasons)
 
 `npm audit` reports two that are deliberately left as-is:

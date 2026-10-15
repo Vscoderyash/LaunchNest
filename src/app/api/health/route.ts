@@ -46,7 +46,7 @@ export async function GET(req: Request) {
     mod = await import("@/lib/firebase-admin");
     steps.import = "ok";
   } catch (err) {
-    steps.import = `fail: ${coarse(err)}`;
+    steps.import = `fail: ${err instanceof Error ? err.message.slice(0, 300) : "error"}`; // module-load errors never contain env values
   }
 
   if (mod) {
