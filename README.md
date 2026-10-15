@@ -224,6 +224,18 @@ and every server route that touches Firebase returned a bodyless HTTP 500
 by its real name, which Vercel's file tracing handles. `/api/health` reports
 this kind of failure per step. Revisit once Turbopack's externals work on Vercel.
 
+## Why firebase-admin is pinned to 13.x
+
+`firebase-admin@14` depends on `jwks-rsa@4`, which `require()`s `jose@6` — an
+ES-module-only package. Vercel's Node runtime can't `require()` ESM, so every
+route importing Firebase Admin died at load with `ERR_REQUIRE_ESM` (seen in
+runtime logs as "require() of ES Module .../jose/dist/webapi/index.js from
+.../jwks-rsa/src/utils.js not supported") and returned a bodyless 500. The 13.x
+line uses `jwks-rsa@3` / `jose@4` (CommonJS-compatible). A regression test
+(`runtime-compat.test.ts`) loads each `firebase-admin` entry point with
+`--no-experimental-require-module` to reproduce Vercel's behavior. Don't bump
+to 14.x until its dependency chain loads under that test.
+
 ## Known dependency vulnerabilities (not fixed, with reasons)
 
 `npm audit` reports two that are deliberately left as-is:
