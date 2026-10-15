@@ -4,18 +4,26 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Rocket } from "lucide-react";
 
+const DURATIONS = [
+  { value: "permanent", label: "Permanent" },
+  { value: "24", label: "Temporary · 24 hours" },
+  { value: "168", label: "Temporary · 7 days" },
+] as const;
+
 export function DeployButton({ projectId }: { projectId: string }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [duration, setDuration] = useState<(typeof DURATIONS)[number]["value"]>("permanent");
 
   async function deploy() {
     setLoading(true);
     setError(null);
+    const temporary = duration !== "permanent";
     const res = await fetch(`/api/projects/${projectId}/deployments`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify(temporary ? { isTemporary: true, temporaryHours: Number(duration) } : {}),
     });
     const data = await res.json();
     setLoading(false);
@@ -28,13 +36,25 @@ export function DeployButton({ projectId }: { projectId: string }) {
 
   return (
     <div className="text-right">
-      <button
-        onClick={deploy}
-        disabled={loading}
-        className="inline-flex items-center gap-1.5 bg-neutral-100 text-neutral-950 text-sm font-medium px-3.5 py-2 rounded-lg hover:bg-white disabled:opacity-50"
-      >
-        <Rocket size={14} /> {loading ? "Deploying…" : "Deploy"}
-      </button>
+      <div className="inline-flex items-center gap-2">
+        <select
+          value={duration}
+          onChange={(e) => setDuration(e.target.value as typeof duration)}
+          aria-label="Deployment duration"
+          className="bg-neutral-900 border border-neutral-800 rounded-lg px-2 py-2 text-xs text-neutral-300 outline-none"
+        >
+          {DURATIONS.map((d) => (
+            <option key={d.value} value={d.value}>{d.label}</option>
+          ))}
+        </select>
+        <button
+          onClick={deploy}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 bg-neutral-100 text-neutral-950 text-sm font-medium px-3.5 py-2 rounded-lg hover:bg-white disabled:opacity-50"
+        >
+          <Rocket size={14} /> {loading ? "Deploying…" : "Deploy"}
+        </button>
+      </div>
       {error && <p className="text-xs text-red-400 mt-1.5 max-w-xs">{error}</p>}
     </div>
   );

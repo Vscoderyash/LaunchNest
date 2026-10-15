@@ -78,7 +78,7 @@ Run tests: `npm test`. Lint: `npm run lint`. Build: `npm run build`.
   upload/GitHub import. Server-side only — `AI_PROVIDER_API_KEY` never
   reaches the client.
 - Real Settings tab (rename, change visibility, delete)
-- 31 unit tests — all pure logic (slug validation, path safety, plan
+- 61 unit tests — all pure logic (slug validation, path safety, plan
   limits, ZIP extraction including the Firestore size cap, encryption
   round-trip, AI response parsing) and so unaffected by which database or
   AI provider sits behind the app
@@ -212,6 +212,39 @@ The 25 unit tests didn't need to change at all — they test pure logic
 `src/lib/encryption.ts`) with no dependency on which database sits behind
 the app.
 
+## Deployments, temporary deployments and analytics (Phase 6)
+
+**Deployments snapshot their files.** Deploying copies the project's files into
+`projects/{id}/deployments/{deploymentId}/files`, and the live site
+(`/sites/<slug>`) is served from the *active deployment's snapshot*, not from the
+editor's working files. Two consequences: editing files no longer changes the
+live site until you deploy, and **rollback really restores the old content**.
+(Before this change, rollback only flipped a flag — the live site always showed
+the latest working files. Deployments created before snapshots existed have no
+copy and keep being served from the working files.) Snapshots are bounded by the
+per-project deployment limit and aren't counted against the storage quota, which
+only measures working files.
+
+**Temporary deployments** (24 hours / 7 days, picked next to the Deploy button)
+take over production while valid. Once `expiresAt` passes, the site automatically
+falls back to the latest *permanent* READY deployment; if there is none it returns
+`410 This temporary deployment has expired.` There is no cleanup cron — expiry is
+evaluated on every request (`pickActiveDeployment` in `src/lib/deployments.ts`,
+unit tested). Rolling back to a deployment makes it permanent.
+
+**Analytics** record a page view when a browser requests an HTML page of a public
+or unlisted site (bots and private sites are skipped), written after the response
+is sent so pages aren't slowed down. Per spec: no cookies and no stored IPs.
+"Unique visitors" are a salted SHA-256 of IP + user agent + project + *date*, so a
+visitor can't be tracked across days. Country comes from Vercel's geo header.
+Stored per event: path, referrer host, country, device class, browser family,
+visitor hash. Shown on the project's Analytics tab (7/30 days) and the overview
+Analytics page. Each page view is one Firestore write — fine for an MVP, but a
+busy site should move to batched counters.
+
+`vercel.json` pins functions to `bom1` (Mumbai) next to the Firestore database;
+with functions in Washington every query crossed the globe and logins were slow.
+
 ## Why the build uses webpack, not Turbopack
 
 `next build` / `next dev` run with `--webpack` on purpose. With Turbopack,
@@ -305,5 +338,5 @@ missing from a full build's output.
 5. **AI website generation** — done (initial generation only; "improve this
    website" / "fix this error" iterative prompts are a natural extension of
    the same code but not yet built)
-6. Analytics, custom domains, temporary deployments (temporary deployments partially done)
+6. **Analytics, temporary deployments** — done (custom domains: UI/data model only, serving + DNS verification still FUTURE)
 7. Teams, billing, advanced infrastructure

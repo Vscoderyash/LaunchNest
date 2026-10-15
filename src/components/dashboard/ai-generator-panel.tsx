@@ -17,6 +17,7 @@ export function AiGeneratorPanel() {
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [created, setCreated] = useState<{ id: string; slug: string } | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -24,19 +25,26 @@ export function AiGeneratorPanel() {
     setWarnings([]);
     setLoading(true);
 
-    const createRes = await fetch("/api/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, visibility }),
-    });
-    const createData = await createRes.json();
-    if (!createRes.ok) {
-      setLoading(false);
-      setError(createData.error ?? "Failed to create project.");
-      return;
+    // Reuse the project from an earlier failed attempt instead of creating
+    // a duplicate that would eat into the free-plan project limit.
+    let project = created;
+    if (!project) {
+      const createRes = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, visibility }),
+      });
+      const createData = await createRes.json();
+      if (!createRes.ok) {
+        setLoading(false);
+        setError(createData.error ?? "Failed to create project.");
+        return;
+      }
+      project = { id: createData.project.id, slug: createData.project.slug };
+      setCreated(project);
     }
 
-    const genRes = await fetch(`/api/projects/${createData.project.id}/generate-ai`, {
+    const genRes = await fetch(`/api/projects/${project.id}/generate-ai`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt, style, colorPreference, websiteType, darkMode, animationLevel }),
@@ -45,12 +53,12 @@ export function AiGeneratorPanel() {
     setLoading(false);
 
     if (!genRes.ok) {
-      setError(`Project created, but generation failed: ${genData.error}`);
+      setError(`Generation failed: ${genData.error} Your project was created — fix the issue and press the button again; it will reuse it.`);
       return;
     }
     if (genData.warnings?.length) setWarnings(genData.warnings);
 
-    router.push(`/dashboard/projects/${createData.project.slug}`);
+    router.push(`/dashboard/projects/${project.slug}`);
   }
 
   return (

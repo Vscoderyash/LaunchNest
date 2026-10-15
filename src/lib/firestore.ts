@@ -57,6 +57,20 @@ export type DeploymentDoc = {
   buildFinishedAt: string | null;
   buildDurationMs: number | null;
   createdAt: string;
+  /** true when this deployment has its own copy of the files (deployments/{id}/files). Older deployments don't. */
+  snapshot?: boolean;
+  fileCount?: number;
+};
+
+export type AnalyticsEventDoc = {
+  path: string;
+  referrer: string | null;
+  country: string | null;
+  device: "desktop" | "mobile" | "tablet";
+  browser: string;
+  /** Daily-rotating salted hash — NOT an IP address and not linkable across days. */
+  visitor: string;
+  createdAt: string;
 };
 
 export type DomainDoc = {
@@ -122,6 +136,14 @@ export function projectFilesCol(projectId: string) {
 
 export function deploymentsCol(projectId: string) {
   return projectsCol().doc(projectId).collection("deployments");
+}
+
+export function deploymentFilesCol(projectId: string, deploymentId: string) {
+  return deploymentsCol(projectId).doc(deploymentId).collection("files");
+}
+
+export function analyticsEventsCol(projectId: string) {
+  return projectsCol().doc(projectId).collection("analyticsEvents");
 }
 
 export function deploymentLogsCol(projectId: string, deploymentId: string) {

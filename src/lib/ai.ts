@@ -3,7 +3,7 @@
 // lives only in this file's env var read — never sent to the client, never
 // referenced from any "use client" component.
 
-const AI_API_KEY = process.env.AI_PROVIDER_API_KEY;
+const AI_API_KEY = process.env.AI_PROVIDER_API_KEY?.trim().replace(/^["']|["']$/g, "");
 const AI_MODEL = process.env.AI_MODEL || "claude-sonnet-4-6";
 
 export class AiGenerationError extends Error {}
@@ -80,6 +80,11 @@ export async function generateWebsiteFiles(opts: AiGenerateOptions): Promise<AiG
     }),
   });
 
+  if (res.status === 401 || res.status === 403) {
+    throw new AiGenerationError(
+      `The AI provider rejected the API key (${res.status}). Set AI_PROVIDER_API_KEY to a valid Anthropic key (starts with sk-ant-) from console.anthropic.com, then redeploy.`
+    );
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new AiGenerationError(`AI provider returned an error (${res.status}). ${body.slice(0, 200)}`);

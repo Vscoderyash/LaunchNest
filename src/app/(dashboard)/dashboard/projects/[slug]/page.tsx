@@ -8,12 +8,14 @@ import { RollbackButton } from "@/components/dashboard/rollback-button";
 import { EnvVarsPanel } from "@/components/dashboard/env-vars-panel";
 import { ProjectSettingsForm } from "@/components/dashboard/project-settings-form";
 import { SimpleEditor } from "@/components/dashboard/simple-editor";
+import { AnalyticsPanel } from "@/components/dashboard/analytics-panel";
+import { expiryLabel, isExpired } from "@/lib/deployments";
 
 const TABS = [
   { key: "overview", label: "Overview", implemented: true },
   { key: "deployments", label: "Deployments", implemented: true },
   { key: "editor", label: "Editor", implemented: true },
-  { key: "analytics", label: "Analytics", implemented: false, phase: "Phase 6" },
+  { key: "analytics", label: "Analytics", implemented: true },
   { key: "domains", label: "Domains", implemented: false, phase: "Phase 6" },
   { key: "env", label: "Environment Variables", implemented: true },
   { key: "settings", label: "Settings", implemented: true },
@@ -24,10 +26,10 @@ export default async function ProjectPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; range?: string }>;
 }) {
   const { slug } = await params;
-  const { tab } = await searchParams;
+  const { tab, range } = await searchParams;
   const activeTab = TABS.some((t) => t.key === tab && t.implemented) ? tab! : "overview";
   const session = await getSession();
 
@@ -128,7 +130,12 @@ export default async function ProjectPage({
                 <div key={d.id} className="flex items-center justify-between px-4 py-3 text-sm">
                   <span>
                     v{d.version} {d.isProduction && <span className="text-neutral-600">· production</span>}
-                    {d.isTemporary && <span className="text-neutral-600"> · temporary</span>}
+                    {d.isTemporary && (
+                      <span className={isExpired(d, new Date()) ? "text-red-400/80" : "text-amber-400/80"}>
+                        {" · temporary, "}
+                        {expiryLabel(d.expiresAt)}
+                      </span>
+                    )}
                   </span>
                   <div className="flex items-center gap-3">
                     <span
@@ -151,6 +158,10 @@ export default async function ProjectPage({
             </div>
           )}
         </div>
+      )}
+
+      {activeTab === "analytics" && (
+        <AnalyticsPanel projectId={project.id} slug={project.slug} visibility={project.visibility} days={range === "30" ? 30 : 7} />
       )}
 
       {activeTab === "editor" && <SimpleEditor projectId={project.id} />}

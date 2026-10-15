@@ -1,18 +1,46 @@
-import { BarChart3 } from "lucide-react";
+import Link from "next/link";
+import { getSession } from "@/lib/session";
+import { projectsCol, analyticsEventsCol, withId, type ProjectDoc } from "@/lib/firestore";
+import { rangeStartISO } from "@/lib/analytics";
 
-// FUTURE (spec section 15 / Phase 6): per-project analytics dashboard.
-// AnalyticsEvent model exists; ingestion + aggregation queries aren't wired yet.
-export default function AnalyticsPage() {
+export default async function AnalyticsPage() {
+  const session = await getSession();
+  const snap = await projectsCol().where("ownerId", "==", session!.uid).where("deletedAt", "==", null).get();
+  const since = rangeStartISO(7);
+
+  const rows = await Promise.all(
+    snap.docs.map(async (doc) => {
+      const project = withId<ProjectDoc>(doc);
+      const count = await analyticsEventsCol(project.id).where("createdAt", ">=", since).count().get();
+      return { project, views: count.data().count };
+    })
+  );
+  rows.sort((a, b) => b.views - a.views);
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Analytics</h1>
-      <div className="border border-dashed border-neutral-800 rounded-2xl py-16 flex flex-col items-center text-center">
-        <BarChart3 size={20} className="text-neutral-600 mb-3" />
-        <p className="text-neutral-300 font-medium">Analytics — coming in Phase 6</p>
-        <p className="text-neutral-500 text-sm mt-1 max-w-sm">
-          Privacy-conscious visitor and page-view stats, no invasive tracking.
-        </p>
+      <div>
+        <h1 className="text-2xl font-semibold">Analytics</h1>
+        <p className="text-sm text-neutral-500 mt-1">Page views over the last 7 days. Open a website for the full breakdown.</p>
       </div>
+      {rows.length === 0 ? (
+        <p className="text-sm text-neutral-500">No websites yet.</p>
+      ) : (
+        <div className="rounded-xl border border-neutral-800/80 divide-y divide-neutral-800/80">
+          {rows.map(({ project, views }) => (
+            <Link
+              key={project.id}
+              href={`/dashboard/projects/${project.slug}?tab=analytics`}
+              className="flex items-center justify-between px-4 py-3 hover:bg-neutral-900/40"
+            >
+              <span className="text-sm">{project.name}</span>
+              <span className="text-sm text-neutral-400 tabular-nums">
+                {project.visibility === "PRIVATE" ? "private" : `${views} views`}
+              </span>
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
   getUser,
   projectsCol,
   projectFilesCol,
+  deploymentFilesCol,
   deploymentsCol,
   deploymentLogsCol,
   domainsCol,
@@ -57,8 +58,8 @@ export async function POST(
   const lastVersionSnap = await deploymentsCol(project.id).orderBy("version", "desc").limit(1).get();
   const version = (lastVersionSnap.docs[0]?.data().version ?? 0) + 1;
 
-  const filesCountSnap = await projectFilesCol(project.id).count().get();
-  if (filesCountSnap.data().count === 0) {
+  const workingFilesSnap = await projectFilesCol(project.id).get();
+  if (workingFilesSnap.empty) {
     return NextResponse.json(
       { error: "This project has no files yet. Upload a ZIP or use the editor before deploying." },
       { status: 400 }
@@ -67,11 +68,27 @@ export async function POST(
 
   const now = new Date();
   const deploymentRef = deploymentsCol(project.id).doc();
+
+  // Snapshot the files this deployment is made of, so the live site only
+  // changes when you deploy, and rollback / temporary-expiry fallback serve
+  // exactly what was deployed (not whatever the editor currently holds).
+  const snapCol = deploymentFilesCol(project.id, deploymentRef.id);
+  await Promise.all(
+    workingFilesSnap.docs.map((f) => {
+      const { path, content, size } = f.data();
+      return snapCol.add({ path, content, size });
+    })
+  );
+
   await deploymentRef.set({
     version,
     status: "READY", // MOCKED build completes synchronously — see file header
     source: "EDITOR",
-    isProduction: !isTemporary,
+    // A temporary deployment takes over production until it expires; the site
+    // then falls back to the latest permanent deployment (see src/lib/deployments.ts).
+    isProduction: true,
+    snapshot: true,
+    fileCount: workingFilesSnap.size,
     isTemporary,
     expiresAt: isTemporary ? new Date(now.getTime() + temporaryHours * 60 * 60 * 1000).toISOString() : null,
     buildStartedAt: now.toISOString(),
@@ -85,6 +102,7 @@ export async function POST(
     "Starting build",
     `Detected framework: ${project.framework}`,
     "Validating files",
+    `Snapshotting ${workingFilesSnap.size} file(s)`,
     "Publishing static assets",
     "Deployment ready",
   ];
@@ -93,7 +111,7 @@ export async function POST(
     logs.map((message) => logsCol.add({ message, level: "info", createdAt: new Date().toISOString() }))
   );
 
-  if (!isTemporary) {
+  {
     // New production deployment supersedes the previous one for hostname routing.
     const prevProdSnap = await deploymentsCol(project.id).where("isProduction", "==", true).get();
     await Promise.all(
