@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseFilesFromResponse, AiGenerationError } from "@/lib/ai";
+import { parseFilesFromResponse, AiGenerationError, resolveProvider, cleanKey, DEFAULT_MODELS } from "@/lib/ai";
 
 describe("parseFilesFromResponse", () => {
   it("parses a valid JSON file map", () => {
@@ -33,5 +33,37 @@ describe("parseFilesFromResponse", () => {
     const files = parseFilesFromResponse(text);
     expect(files["index.html"]).toBe("<h1>hi</h1>");
     expect(files.extra).toBeUndefined();
+  });
+});
+
+describe("parseFilesFromResponse with chatty models", () => {
+  it("extracts the JSON object from surrounding prose", () => {
+    const text = "Sure! Here is your site:\n" + JSON.stringify({ "index.html": "<h1>hi</h1>" }) + "\nHope that helps!";
+    expect(parseFilesFromResponse(text)["index.html"]).toBe("<h1>hi</h1>");
+  });
+  it("still throws when there is no JSON object at all", () => {
+    expect(() => parseFilesFromResponse("I cannot do that.")).toThrow(AiGenerationError);
+  });
+});
+
+describe("resolveProvider / cleanKey", () => {
+  it("detects NVIDIA from the nvapi- prefix", () => expect(resolveProvider("nvapi-abc")).toBe("nvidia"));
+  it("defaults to Anthropic otherwise", () => {
+    expect(resolveProvider("sk-ant-abc")).toBe("anthropic");
+    expect(resolveProvider(undefined)).toBe("anthropic");
+  });
+  it("lets AI_PROVIDER override detection", () => {
+    expect(resolveProvider("sk-ant-abc", "NVIDIA")).toBe("nvidia");
+    expect(resolveProvider("nvapi-abc", "anthropic")).toBe("anthropic");
+    expect(resolveProvider("nvapi-abc", "bogus")).toBe("nvidia");
+  });
+  it("strips whitespace and wrapping quotes from keys", () => {
+    expect(cleanKey('  "nvapi-abc" ')).toBe("nvapi-abc");
+    expect(cleanKey("   ")).toBeUndefined();
+    expect(cleanKey(undefined)).toBeUndefined();
+  });
+  it("has a default model for each provider", () => {
+    expect(DEFAULT_MODELS.nvidia).toContain("/");
+    expect(DEFAULT_MODELS.anthropic).toContain("claude");
   });
 });

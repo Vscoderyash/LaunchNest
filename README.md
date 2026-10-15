@@ -73,12 +73,14 @@ Run tests: `npm test`. Lint: `npm run lint`. Build: `npm run build`.
 - Editor: file tree, textarea, and a live client-side preview
 - **AI website generation**: describe a site, pick style/color/type/theme/
   animation preferences, get a real generated static site
-  (`src/lib/ai.ts` + `/api/projects/[id]/generate-ai`) via the Anthropic
-  API. Same Firestore size-cap and storage-limit handling as ZIP
+  (`src/lib/ai.ts` + `/api/projects/[id]/generate-ai`) via NVIDIA NIM
+  (`nvapi-…` keys, default model `meta/llama-3.3-70b-instruct`) or the Anthropic
+  API (`sk-ant-…` keys) — auto-detected from the key, overridable with
+  `AI_PROVIDER` / `AI_MODEL`. Same Firestore size-cap and storage-limit handling as ZIP
   upload/GitHub import. Server-side only — `AI_PROVIDER_API_KEY` never
   reaches the client.
 - Real Settings tab (rename, change visibility, delete)
-- 61 unit tests — all pure logic (slug validation, path safety, plan
+- 75 unit tests — all pure logic (slug validation, path safety, plan
   limits, ZIP extraction including the Firestore size cap, encryption
   round-trip, AI response parsing) and so unaffected by which database or
   AI provider sits behind the app
@@ -244,6 +246,20 @@ busy site should move to batched counters.
 
 `vercel.json` pins functions to `bom1` (Mumbai) next to the Firestore database;
 with functions in Washington every query crossed the globe and logins were slow.
+
+## AI providers
+
+`AI_PROVIDER_API_KEY` decides the provider: keys starting `nvapi-` use NVIDIA
+NIM's OpenAI-compatible endpoint (`integrate.api.nvidia.com`), `sk-ant-` keys use
+Anthropic. `AI_MODEL` overrides the default model and `AI_PROVIDER` forces one.
+The generate route has `maxDuration = 60` and the provider call aborts at 55s with
+a readable message — generation takes tens of seconds and Vercel's default
+function limit is much shorter. NVIDIA output is capped at 4096 tokens, so the
+system prompt asks for a compact single page; a truncated reply is reported as
+"cut off" rather than as a JSON error. Open models often wrap JSON in prose, so
+the parser falls back to the outermost `{…}`. The provider request shapes are
+unit tested against mocked responses (`ai-provider.test.ts`); they haven't been
+exercised against the live NVIDIA API from CI.
 
 ## Why the build uses webpack, not Turbopack
 

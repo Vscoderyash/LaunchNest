@@ -11,6 +11,9 @@ import { getLimitsForTier } from "@/lib/limits";
 import { generateWebsiteFiles, AiGenerationError } from "@/lib/ai";
 import { MAX_FIRESTORE_TEXT_BYTES } from "@/lib/zip";
 
+// Generation takes tens of seconds; Vercel's default function limit is far shorter.
+export const maxDuration = 60;
+
 const GenerateSchema = z.object({
   prompt: z.string().min(3).max(2000),
   style: z.string().max(200).optional(),
