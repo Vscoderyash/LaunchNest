@@ -6,6 +6,7 @@
 //   /api/health?skip=admin   -> env + runtime info only (never touches Firebase)
 
 import { NextResponse } from "next/server";
+import { auditEnv } from "@/lib/env-audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -27,23 +28,27 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 
 export async function GET(req: Request) {
-  const env = {
-    FIREBASE_SERVICE_ACCOUNT_KEY: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_KEY),
-    ENCRYPTION_KEY: Boolean(process.env.ENCRYPTION_KEY),
-    NEXT_PUBLIC_FIREBASE_API_KEY: Boolean(process.env.NEXT_PUBLIC_FIREBASE_API_KEY),
-    NEXT_PUBLIC_FIREBASE_PROJECT_ID: Boolean(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID),
-    AI_PROVIDER_API_KEY: Boolean(process.env.AI_PROVIDER_API_KEY),
-  };
+  const env = auditEnv(process.env);
   const runtime = { node: process.version, region: process.env.VERCEL_REGION ?? null };
 
   if (new URL(req.url).searchParams.get("skip") === "admin") {
-    return NextResponse.json({ ok: true, skipped: "admin", runtime, env });
+    return NextResponse.json({ ok: env.missingRequired.length === 0, skipped: "admin", runtime, env });
   }
 
   const steps: Record<string, string> = {};
+  const ms: Record<string, number> = {};
+  const time = async <T,>(name: string, fn: () => Promise<T>): Promise<T> => {
+    const t = performance.now();
+    try {
+      return await fn();
+    } finally {
+      ms[name] = Math.round(performance.now() - t);
+    }
+  };
+
   let mod: typeof import("@/lib/firebase-admin") | null = null;
   try {
-    mod = await import("@/lib/firebase-admin");
+    mod = await time("import", () => import("@/lib/firebase-admin"));
     steps.import = "ok";
   } catch (err) {
     steps.import = `fail: ${err instanceof Error ? err.message.slice(0, 300) : "error"}`; // module-load errors never contain env values
@@ -51,20 +56,23 @@ export async function GET(req: Request) {
 
   if (mod) {
     try {
-      mod.getAdminAuth();
+      await time("adminInit", async () => mod!.getAdminAuth());
       steps.adminInit = "ok";
     } catch (err) {
       steps.adminInit = `fail: ${coarse(err)}`;
     }
     if (steps.adminInit === "ok") {
       try {
-        await withTimeout(mod.getAdminAuth().listUsers(1), 8000, "auth");
+        await time("authApi", () => withTimeout(mod!.getAdminAuth().listUsers(1), 8000, "auth"));
         steps.authApi = "ok";
       } catch (err) {
         steps.authApi = `fail: ${coarse(err)}`;
       }
+      // Two reads: the first includes connection setup (cold), the second is
+      // the steady-state latency between this function's region and Firestore.
       try {
-        await withTimeout(mod.getDb().collection("_health").limit(1).get(), 8000, "firestore");
+        await time("firestoreFirstRead", () => withTimeout(mod!.getDb().collection("_health").limit(1).get(), 8000, "firestore"));
+        await time("firestoreSecondRead", () => withTimeout(mod!.getDb().collection("_health").limit(1).get(), 8000, "firestore"));
         steps.firestore = "ok";
       } catch (err) {
         steps.firestore = `fail: ${coarse(err)}`;
@@ -72,6 +80,6 @@ export async function GET(req: Request) {
     }
   }
 
-  const ok = Object.values(steps).every((v) => v === "ok");
-  return NextResponse.json({ ok, steps, runtime, env }, { status: ok ? 200 : 500 });
+  const ok = Object.values(steps).every((v) => v === "ok") && env.missingRequired.length === 0;
+  return NextResponse.json({ ok, steps, timingsMs: ms, runtime, env }, { status: ok ? 200 : 500 });
 }

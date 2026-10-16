@@ -80,7 +80,7 @@ Run tests: `npm test`. Lint: `npm run lint`. Build: `npm run build`.
   upload/GitHub import. Server-side only — `AI_PROVIDER_API_KEY` never
   reaches the client.
 - Real Settings tab (rename, change visibility, delete)
-- 75 unit tests — all pure logic (slug validation, path safety, plan
+- 79 unit tests — all pure logic (slug validation, path safety, plan
   limits, ZIP extraction including the Firestore size cap, encryption
   round-trip, AI response parsing) and so unaffected by which database or
   AI provider sits behind the app
@@ -246,6 +246,30 @@ busy site should move to batched counters.
 
 `vercel.json` pins functions to `bom1` (Mumbai) next to the Firestore database;
 with functions in Washington every query crossed the globe and logins were slow.
+
+## Environment variables: what to keep and what to delete
+
+Required (the app is broken without these): the six `NEXT_PUBLIC_FIREBASE_*`
+values, `FIREBASE_SERVICE_ACCOUNT_KEY`, `ENCRYPTION_KEY`. Optional:
+`AI_PROVIDER_API_KEY` (AI generation), `AI_PROVIDER`, `AI_MODEL`, `BASE_DOMAIN`
+(only once you own a domain with wildcard DNS). Dead since the Firebase
+migration — delete from Vercel: `DATABASE_URL`, `DIRECT_URL`, `AUTH_SECRET`,
+`GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `S3_*`,
+`FIREBASE_STORAGE_BUCKET_FOR_ASSETS`. The list lives in `src/lib/env-audit.ts`,
+and `/api/health` reports `missingRequired`, `deleteThese` and the AI key's
+*format* (never any value), plus per-step timings.
+
+## Performance notes
+
+Every dashboard request used to verify the session with `checkRevoked: true`,
+which is a live Firebase Auth call — and the layout and page each did it. Now it
+verifies locally (signature + expiry against cached Google keys) once per request
+(`React.cache`). Tradeoff: a session revoked server-side stays valid until its
+cookie expires. `loading.tsx` adds an instant skeleton on navigation. Functions
+run in `bom1` (see `vercel.json`) so they sit next to a Mumbai Firestore database;
+`/api/health` shows `firestoreSecondRead` — the steady-state latency to Firestore
+— which should be tens of ms, not hundreds. If it's hundreds, the function region
+and the database region don't match.
 
 ## AI providers
 
