@@ -21,7 +21,7 @@ async function establishSession(idToken: string) {
 function friendlyGoogleError(code: string): string {
   if (code.includes("unauthorized-domain"))
     return "This domain isn't authorized for sign-in yet — add it in Firebase Console → Authentication → Settings → Authorized domains.";
-  if (code.includes("popup-closed-by-user") || code.includes("cancelled-popup-request")) return "Sign-in was cancelled.";
+  if (code.includes("popup-closed-by-user") || code.includes("cancelled-popup-request")) return `Google sign-in was cancelled or the popup closed early (${code.match(/auth\/[a-z-]+/)?.[0] ?? "no code"}). Click the button once, choose your account and wait for it to finish — or allow popups for this site and try again.`;
   if (code.includes("popup-blocked")) return "Your browser blocked the sign-in popup — allow popups for this site and try again.";
   if (code.includes("operation-not-allowed"))
     return "Google sign-in isn't enabled for this project — enable it in Firebase Console → Authentication → Sign-in method.";
@@ -35,6 +35,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -62,6 +63,10 @@ export default function LoginPage() {
   }
 
   async function handleGoogle() {
+    // A second click while the popup is open cancels the first one
+    // (auth/cancelled-popup-request), so ignore clicks until it settles.
+    if (googleBusy) return;
+    setGoogleBusy(true);
     setError(null);
     try {
       const cred = await signInWithPopup(firebaseAuth, googleProvider);
@@ -71,6 +76,8 @@ export default function LoginPage() {
     } catch (err) {
       const code = err instanceof Error ? err.message : "";
       setError(friendlyGoogleError(code));
+    } finally {
+      setGoogleBusy(false);
     }
   }
 
@@ -82,7 +89,8 @@ export default function LoginPage() {
 
         <button
           onClick={handleGoogle}
-          className="w-full flex items-center justify-center gap-2 border border-neutral-800 rounded-lg py-2.5 mb-3 hover:border-neutral-600 text-sm"
+          disabled={googleBusy}
+          className="disabled:opacity-60 w-full flex items-center justify-center gap-2 border border-neutral-800 rounded-lg py-2.5 mb-3 hover:border-neutral-600 text-sm"
         >
           <svg width="16" height="16" viewBox="0 0 48 48">
             <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
