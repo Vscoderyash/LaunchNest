@@ -27,7 +27,7 @@ describe("NVIDIA provider request", () => {
     expect(url).toBe("https://integrate.api.nvidia.com/v1/chat/completions");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer nvapi-test");
     const body = JSON.parse(init.body as string);
-    expect(body.model).toBe("meta/llama-3.3-70b-instruct");
+    expect(body.model).toBe("meta/llama-3.1-8b-instruct");
     expect(body.messages.map((m: { role: string }) => m.role)).toEqual(["system", "user"]);
     expect(body.stream).toBe(false);
   });
