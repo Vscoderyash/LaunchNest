@@ -64,9 +64,10 @@ describe("NVIDIA provider request", () => {
   });
 });
 
-describe("Anthropic provider still works", () => {
-  it("uses the Messages API for sk-ant keys", async () => {
+describe("Anthropic provider via explicit override", () => {
+  it("uses the Messages API when AI_PROVIDER=anthropic", async () => {
     process.env.AI_PROVIDER_API_KEY = "sk-ant-test";
+    process.env.AI_PROVIDER = "anthropic";
     const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       json({ content: [{ type: "text", text: '{"index.html":"<p>a</p>"}' }], stop_reason: "end_turn" })
     );
