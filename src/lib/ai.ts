@@ -11,8 +11,8 @@
 export type AiProvider = "anthropic" | "nvidia";
 
 export const DEFAULT_MODELS: Record<AiProvider, string> = {
-  anthropic: "claude-sonnet-4-6",
-  nvidia: "meta/llama-3.3-70b-instruct",
+  anthropic: "claude-haiku-5-5",
+  nvidia: "meta/llama-3.1-8b-instruct",
 };
 
 const REQUEST_TIMEOUT_MS = 55_000; // stay under the route's 60s maxDuration
@@ -42,21 +42,16 @@ export type AiGenerateOptions = {
 export type AiGeneratedFiles = Record<string, string>;
 
 function buildUserPrompt(opts: AiGenerateOptions): string {
-  const parts = [`Build a website: ${opts.prompt}`];
-  if (opts.websiteType) parts.push(`Website type: ${opts.websiteType}.`);
-  if (opts.style) parts.push(`Visual style: ${opts.style}.`);
-  if (opts.colorPreference) parts.push(`Color preference: ${opts.colorPreference}.`);
-  parts.push(`Theme: ${opts.darkMode === false ? "light" : "dark"} mode.`);
-  parts.push(`Animation level: ${opts.animationLevel ?? "subtle"}.`);
-  parts.push("The site must be responsive on mobile.");
-  return parts.join(" ");
+  const parts = [opts.prompt];
+  if (opts.websiteType) parts.push(`type:${opts.websiteType}`);
+  if (opts.style) parts.push(`style:${opts.style}`);
+  if (opts.colorPreference) parts.push(`colors:${opts.colorPreference}`);
+  if (opts.darkMode === false) parts.push("light theme");
+  if (opts.animationLevel && opts.animationLevel !== "subtle") parts.push(`animation:${opts.animationLevel}`);
+  return parts.join(", ");
 }
 
-const SYSTEM_PROMPT = `You generate simple static websites (HTML/CSS/vanilla JS only — no build step, no frameworks).
-
-Respond with ONLY a single JSON object, no markdown fences, no explanation before or after. The object's keys are file paths and values are the complete file contents as strings. You must include "index.html" as a key. You may also include "style.css" and "script.js" if useful — index.html should link/reference them by those exact relative paths.
-
-Keep it compact: one page, roughly 150 lines of HTML and CSS combined, minimal JavaScript. Escape all quotes and newlines so the JSON is valid. Do not include any commentary, only the JSON object.`;
+const SYSTEM_PROMPT = `Reply with ONLY a JSON object: {"index.html":"...","style.css":"..."}. Complete HTML document in index.html. CSS/JS injected externally — no <link>/<script> tags. Under 80 lines total. No text outside the JSON.`;
 
 /** Parses the model's raw text output into a file map. Exported for testing. */
 export function parseFilesFromResponse(text: string): AiGeneratedFiles {
@@ -132,7 +127,7 @@ async function callAnthropic(key: string, model: string, system: string, user: s
   const res = await timedFetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model, max_tokens: 8000, system, messages: [{ role: "user", content: user }] }),
+    body: JSON.stringify({ model, max_tokens: 1500, system, messages: [{ role: "user", content: user }] }),
   });
   await failOnBadResponse(res, "anthropic", model);
   const data = await res.json();
@@ -153,7 +148,7 @@ async function callNvidia(key: string, model: string, system: string, user: stri
         { role: "system", content: system },
         { role: "user", content: user },
       ],
-      max_tokens: 4096,
+      max_tokens: 1500,
       temperature: 0.4,
       stream: false,
     }),
