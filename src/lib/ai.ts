@@ -25,7 +25,7 @@ export function cleanKey(raw: string | undefined): string | undefined {
 export function resolveProvider(key: string | undefined, explicit?: string): AiProvider {
   const e = explicit?.trim().toLowerCase();
   if (e === "nvidia" || e === "anthropic") return e;
-  return key?.startsWith("nvapi-") ? "nvidia" : "anthropic";
+  return "nvidia"; // always NVIDIA unless explicitly overridden to anthropic
 }
 
 export class AiGenerationError extends Error {}

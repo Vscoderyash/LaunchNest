@@ -48,14 +48,14 @@ describe("parseFilesFromResponse with chatty models", () => {
 
 describe("resolveProvider / cleanKey", () => {
   it("detects NVIDIA from the nvapi- prefix", () => expect(resolveProvider("nvapi-abc")).toBe("nvidia"));
-  it("defaults to Anthropic otherwise", () => {
-    expect(resolveProvider("sk-ant-abc")).toBe("anthropic");
-    expect(resolveProvider(undefined)).toBe("anthropic");
+  it("defaults to NVIDIA always", () => {
+    expect(resolveProvider("sk-ant-abc")).toBe("nvidia");
+    expect(resolveProvider(undefined)).toBe("nvidia");
   });
-  it("lets AI_PROVIDER override detection", () => {
-    expect(resolveProvider("sk-ant-abc", "NVIDIA")).toBe("nvidia");
-    expect(resolveProvider("nvapi-abc", "anthropic")).toBe("anthropic");
+  it("lets AI_PROVIDER=anthropic override to Anthropic", () => {
+    expect(resolveProvider("sk-ant-abc", "anthropic")).toBe("anthropic");
     expect(resolveProvider("nvapi-abc", "bogus")).toBe("nvidia");
+    expect(resolveProvider("nvapi-abc", "NVIDIA")).toBe("nvidia");
   });
   it("strips whitespace and wrapping quotes from keys", () => {
     expect(cleanKey('  "nvapi-abc" ')).toBe("nvapi-abc");
