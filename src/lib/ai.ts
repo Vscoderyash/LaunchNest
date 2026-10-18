@@ -12,7 +12,7 @@ export type AiProvider = "anthropic" | "nvidia";
 
 export const DEFAULT_MODELS: Record<AiProvider, string> = {
   anthropic: "claude-haiku-5-5",
-  nvidia: "meta/llama-3.1-8b-instruct",
+  nvidia: "nvidia/llama-3.1-nemotron-70b-instruct",
 };
 
 const REQUEST_TIMEOUT_MS = 55_000; // stay under the route's 60s maxDuration

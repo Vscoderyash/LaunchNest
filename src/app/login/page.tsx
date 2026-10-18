@@ -72,7 +72,7 @@ export default function LoginPage() {
       const cred = await signInWithPopup(firebaseAuth, googleProvider);
       const idToken = await cred.user.getIdToken();
       await establishSession(idToken);
-      router.push("/dashboard");
+      window.location.href = "/dashboard";
     } catch (err) {
       const code = err instanceof Error ? err.message : "";
       setError(friendlyGoogleError(code));
