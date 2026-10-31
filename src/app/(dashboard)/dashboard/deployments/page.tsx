@@ -46,7 +46,7 @@ export default async function DeploymentsPage() {
           {deployments.map((d) => (
             <Link
               key={d.id}
-              href={`/dashboard/projects/${d.project.slug}?tab=deployments`}
+              href={`/dashboard/deployments/${d.id}`}
               className="flex items-center justify-between px-4 py-3 hover:bg-neutral-900/40"
             >
               <div>

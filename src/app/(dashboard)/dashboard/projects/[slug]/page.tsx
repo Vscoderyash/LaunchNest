@@ -127,9 +127,12 @@ export default async function ProjectPage({
           ) : (
             <div className="rounded-xl border border-neutral-800/80 divide-y divide-neutral-800/80">
               {deployments.map((d) => (
-                <div key={d.id} className="flex items-center justify-between px-4 py-3 text-sm">
+                <div key={d.id} className="flex items-center justify-between px-4 py-3 text-sm group">
                   <span>
-                    v{d.version} {d.isProduction && <span className="text-neutral-600">· production</span>}
+                    <Link href={`/dashboard/deployments/${d.id}`} className="hover:underline text-neutral-300">
+                      v{d.version}
+                    </Link>
+                    {d.isProduction && <span className="text-neutral-600"> · production</span>}
                     {d.isTemporary && (
                       <span className={isExpired(d, new Date()) ? "text-red-400/80" : "text-amber-400/80"}>
                         {" · temporary, "}
