@@ -48,9 +48,10 @@ describe("parseFilesFromResponse with chatty models", () => {
 
 describe("resolveProvider / cleanKey", () => {
   it("detects NVIDIA from the nvapi- prefix", () => expect(resolveProvider("nvapi-abc")).toBe("nvidia"));
-  it("defaults to NVIDIA always", () => {
-    expect(resolveProvider("sk-ant-abc")).toBe("nvidia");
+  it("uses Anthropic only for sk-ant keys, NVIDIA otherwise", () => {
+    expect(resolveProvider("sk-ant-abc")).toBe("anthropic");
     expect(resolveProvider(undefined)).toBe("nvidia");
+    expect(resolveProvider("other")).toBe("nvidia");
   });
   it("lets AI_PROVIDER=anthropic override to Anthropic", () => {
     expect(resolveProvider("sk-ant-abc", "anthropic")).toBe("anthropic");
