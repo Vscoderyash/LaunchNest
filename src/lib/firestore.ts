@@ -118,6 +118,10 @@ export function withId<T>(
   return { id: doc.id, ...(doc.data() as T) };
 }
 
+export function aiSettingsCol() {
+  return getDb().collection("aiSettings");
+}
+
 export function usersCol() {
   return getDb().collection("users");
 }

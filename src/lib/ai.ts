@@ -22,6 +22,12 @@ export function cleanKey(raw: string | undefined): string | undefined {
   return k || undefined;
 }
 
+/** Cheap format check for a pasted key (nvapi-… or sk-ant-…). */
+export function isPlausibleAiKey(raw?: string): boolean {
+  const k = cleanKey(raw);
+  return !!k && k.length >= 20 && /^(nvapi-|sk-ant-)/.test(k);
+}
+
 export function resolveProvider(key: string | undefined, explicit?: string): AiProvider {
   const e = explicit?.trim().toLowerCase();
   if (e === "nvidia" || e === "anthropic") return e;
@@ -159,13 +165,15 @@ async function callNvidia(key: string, model: string, system: string, user: stri
   return { text: choice?.message?.content ?? "", truncated: choice?.finish_reason === "length" };
 }
 
-export async function generateWebsiteFiles(opts: AiGenerateOptions): Promise<AiGeneratedFiles> {
-  const key = cleanKey(process.env.AI_PROVIDER_API_KEY);
+/** keyOverride = the signed-in user's own saved key; falls back to the server's env key. */
+export async function generateWebsiteFiles(opts: AiGenerateOptions, keyOverride?: string): Promise<AiGeneratedFiles> {
+  const key = cleanKey(keyOverride) ?? cleanKey(process.env.AI_PROVIDER_API_KEY);
   if (!key) {
-    throw new AiGenerationError("AI generation isn't configured — AI_PROVIDER_API_KEY is not set.");
+    throw new AiGenerationError("No AI key yet — add yours in Settings → AI key.");
   }
-  const provider = resolveProvider(key, process.env.AI_PROVIDER);
-  const model = process.env.AI_MODEL?.trim() || DEFAULT_MODELS[provider];
+  const own = Boolean(cleanKey(keyOverride)); // server-wide provider/model overrides don't apply to a user's own key
+  const provider = resolveProvider(key, own ? undefined : process.env.AI_PROVIDER);
+  const model = (!own && process.env.AI_MODEL?.trim()) || DEFAULT_MODELS[provider];
   const user = buildUserPrompt(opts);
 
   const out =

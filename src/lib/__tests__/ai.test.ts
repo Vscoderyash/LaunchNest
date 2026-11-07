@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseFilesFromResponse, AiGenerationError, resolveProvider, cleanKey, DEFAULT_MODELS } from "@/lib/ai";
+import { parseFilesFromResponse, AiGenerationError, resolveProvider, cleanKey, DEFAULT_MODELS, isPlausibleAiKey } from "@/lib/ai";
 
 describe("parseFilesFromResponse", () => {
   it("parses a valid JSON file map", () => {
@@ -66,5 +66,18 @@ describe("resolveProvider / cleanKey", () => {
   it("has a default model for each provider", () => {
     expect(DEFAULT_MODELS.nvidia).toContain("/");
     expect(DEFAULT_MODELS.anthropic).toContain("claude");
+  });
+});
+
+describe("isPlausibleAiKey", () => {
+  it("accepts NVIDIA and Anthropic key shapes", () => {
+    expect(isPlausibleAiKey("nvapi-" + "a".repeat(30))).toBe(true);
+    expect(isPlausibleAiKey('"sk-ant-' + "b".repeat(30) + '"')).toBe(true);
+  });
+  it("rejects other strings", () => {
+    expect(isPlausibleAiKey("hello")).toBe(false);
+    expect(isPlausibleAiKey("sk-proj-" + "c".repeat(30))).toBe(false);
+    expect(isPlausibleAiKey("nvapi-short")).toBe(false);
+    expect(isPlausibleAiKey(undefined)).toBe(false);
   });
 });

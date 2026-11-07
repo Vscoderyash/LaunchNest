@@ -2,6 +2,8 @@ import { getSession } from "@/lib/session";
 import { getUser } from "@/lib/firestore";
 import { getLimitsForTier } from "@/lib/limits";
 
+import { AiKeyForm } from "@/components/dashboard/ai-key-form";
+
 export default async function SettingsPage() {
   const session = await getSession();
   const user = await getUser(session!.uid);
@@ -40,6 +42,11 @@ export default async function SettingsPage() {
             Billing and plan upgrades are FUTURE (Phase 7) — no payments are implemented yet.
           </p>
         </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-neutral-300">AI key</h2>
+        <AiKeyForm />
       </section>
     </div>
   );

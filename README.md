@@ -271,6 +271,15 @@ run in `bom1` (see `vercel.json`) so they sit next to a Mumbai Firestore databas
 — which should be tens of ms, not hundreds. If it's hundreds, the function region
 and the database region don't match.
 
+## AI key in the app (Settings → AI key)
+
+Users can paste their own NVIDIA (`nvapi-…`) or Anthropic (`sk-ant-…`) key in
+Settings instead of editing Vercel env vars. It's stored AES-256-GCM encrypted
+(`aiSettings/{uid}`, needs `ENCRYPTION_KEY`), never returned to the browser (only
+the last 4 characters), and used only for that user's generations; without one,
+the server's `AI_PROVIDER_API_KEY` is the fallback. `AI_PROVIDER`/`AI_MODEL`
+apply to the server key only.
+
 ## AI providers
 
 `AI_PROVIDER_API_KEY` decides the provider: keys starting `nvapi-` use NVIDIA

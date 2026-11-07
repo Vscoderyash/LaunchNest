@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Sparkles } from "lucide-react";
 
 export function AiGeneratorPanel() {
@@ -154,7 +155,14 @@ export function AiGeneratorPanel() {
         </div>
       </div>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && (
+        <p className="text-sm text-red-400">
+          {error}{" "}
+          {/key|AI key/i.test(error) && (
+            <Link href="/dashboard/settings" className="underline text-neutral-200">Open Settings →</Link>
+          )}
+        </p>
+      )}
       {warnings.map((w) => (
         <p key={w} className="text-xs text-amber-400/90">{w}</p>
       ))}

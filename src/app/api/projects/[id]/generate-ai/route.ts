@@ -6,7 +6,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/session";
-import { getUser, projectsCol, projectFilesCol } from "@/lib/firestore";
+import { getUser, projectsCol, projectFilesCol, aiSettingsCol } from "@/lib/firestore";
+import { decryptSecret } from "@/lib/encryption";
 import { getLimitsForTier } from "@/lib/limits";
 import { generateWebsiteFiles, AiGenerationError } from "@/lib/ai";
 import { MAX_FIRESTORE_TEXT_BYTES } from "@/lib/zip";
@@ -47,7 +48,16 @@ export async function POST(
 
   let generated;
   try {
-    generated = await generateWebsiteFiles(parsed.data);
+    let userKey: string | undefined;
+    const saved = await aiSettingsCol().doc(session.uid).get();
+    if (saved.exists) {
+      try {
+        userKey = decryptSecret(saved.data()!.encryptedKey);
+      } catch {
+        // unreadable (e.g. ENCRYPTION_KEY changed) — fall back to the server key
+      }
+    }
+    generated = await generateWebsiteFiles(parsed.data, userKey);
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof AiGenerationError ? err.message : "AI generation failed." },
